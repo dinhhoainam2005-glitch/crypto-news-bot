@@ -3,6 +3,7 @@ BOT TIN HIEU GIAO DICH + TRACKER + SCALP - FULL
 - V16: 3 coin x 3 khung (1h, 4h, 1d) - ADX + S/R + Entry ly tuong
 - Scalp: 3 coin x 15m - RSI + BB - An song ngan
 - Tracker tu dong theo doi + Bao cao 12h
+- Format chuan: so lieu THAT 100%
 """
 import requests
 import pandas as pd
@@ -30,7 +31,7 @@ _last_report = 0
 os.makedirs("data", exist_ok=True)
 
 # ============================================
-# GUI TELEGRAM
+# TELEGRAM
 # ============================================
 def gui(msg):
     try:
@@ -38,8 +39,12 @@ def gui(msg):
                      data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
     except: pass
 
+def now_str():
+    n = datetime.now()
+    return f"🕐 {n.strftime('%H:%M')} (Asia) | {(n-timedelta(hours=5)).strftime('%H:%M')} (EU) | {(n-timedelta(hours=11)).strftime('%H:%M')} (US) | {n.strftime('%d/%m/%Y')}"
+
 # ============================================
-# TRACKER (V16 + Scalp)
+# TRACKER
 # ============================================
 def _t_load(file=TRACKER_FILE):
     if os.path.exists(file):
@@ -136,7 +141,6 @@ def tracker_report():
 # SCALP 15M
 # ============================================
 def scalp_analysis(symbol):
-    """Scalp 15m: RSI + BB"""
     try:
         df = lay_nen(symbol, "15m", 100)
         if df is None: return None
@@ -149,36 +153,39 @@ def scalp_analysis(symbol):
         bb_mid = df['BB_mid'].iloc[-1]
         atr = df['ATR'].iloc[-1]
         volr = df['Volume_Ratio'].iloc[-1]
+        adx = df['ADX'].iloc[-1]
+        ma20 = df['MA20'].iloc[-1]
+        ma50 = df['MA50'].iloc[-1]
+        ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
+        ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
         
         if pd.isna(rsi) or pd.isna(atr): return None
         
-        # LONG: RSI < 25 + gia gan BB low + volume > 1.2
+        trend = "WEAK_BULLISH" if ema9 > ema21 else "WEAK_BEARISH"
+        
         if rsi < 25 and gia <= bb_low * 1.005 and volr > 1.2:
             entry = gia
             sl = round(gia - atr * 0.8, 2)
             tp = round(bb_mid, 2)
-            return {'signal': 'LONG', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'score': 3}
+            return {'signal': 'LONG', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr, 'trend': trend, 'score': 3}
         
-        # LONG yeu hon
         if rsi < 30 and volr > 1.0:
             entry = gia
             sl = round(gia * 0.997, 2)
             tp = round(gia * 1.01, 2)
-            return {'signal': 'LONG', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'score': 2}
+            return {'signal': 'LONG', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr, 'trend': trend, 'score': 2}
         
-        # SHORT: RSI > 75 + gia gan BB high + volume > 1.2
         if rsi > 75 and gia >= bb_high * 0.995 and volr > 1.2:
             entry = gia
             sl = round(gia + atr * 0.8, 2)
             tp = round(bb_mid, 2)
-            return {'signal': 'SHORT', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'score': 3}
+            return {'signal': 'SHORT', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr, 'trend': trend, 'score': 3}
         
-        # SHORT yeu hon
         if rsi > 70 and volr > 1.0:
             entry = gia
             sl = round(gia * 1.003, 2)
             tp = round(gia * 0.99, 2)
-            return {'signal': 'SHORT', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'score': 2}
+            return {'signal': 'SHORT', 'entry': entry, 'sl': sl, 'tp': tp, 'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr, 'trend': trend, 'score': 2}
         
         return None
     except:
@@ -296,7 +303,7 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
     if signal_type=="LONG":
         cac_muc=[]
         for s in supports[:3]:
-            if s<gia: cac_muc.append((f"Support ${s:.0f}",s)); break
+            if s<gia: cac_muc.append((f"R1",s)); break
         if ma20<gia: cac_muc.append(("MA20",ma20))
         if ma50<gia: cac_muc.append(("MA50",ma50))
         if ema20<gia: cac_muc.append(("EMA20",ema20))
@@ -311,11 +318,11 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
         for r in resistances:
             if r>entry: tp_resistance=r*0.995; break
         tp1=min(tp_atr,tp_resistance) if tp_resistance else tp_atr; tp1=round(tp1,2)
-        tp2=round(entry+atr*3,2)
+        tp2=round(entry+atr*3,2); tp3=round(entry+atr*4,2)
     else:
         cac_muc=[]
         for r in resistances[:3]:
-            if r>gia: cac_muc.append((f"Resistance ${r:.0f}",r)); break
+            if r>gia: cac_muc.append((f"R1",r)); break
         if ma20>gia: cac_muc.append(("MA20",ma20))
         if ma50>gia: cac_muc.append(("MA50",ma50))
         if ema20>gia: cac_muc.append(("EMA20",ema20))
@@ -330,14 +337,14 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
         for s in supports:
             if s<entry: tp_support=s*1.005; break
         tp1=max(tp_atr,tp_support) if tp_support else tp_atr; tp1=round(tp1,2)
-        tp2=round(entry-atr*3,2)
-    return entry, entry_name, sl, tp1, tp2
+        tp2=round(entry-atr*3,2); tp3=round(entry-atr*4,2)
+    return entry, entry_name, sl, tp1, tp2, tp3
 
 # ============================================
 # MAIN
 # ============================================
 print("="*60)
-print(f"🤖 BOT TIN HIEU V16 + SCALP + TRACKER")
+print(f"🤖 BOT V16 + SCALP + TRACKER")
 print("="*60)
 gui("🤖 Bot V16 + Scalp + Tracker da khoi dong!\nV16: 1h+4h+1d | Scalp: 15m\nADX + S/R + Entry ly tuong\n📊 Tu dong theo doi + Bao cao 12h")
 
@@ -355,20 +362,34 @@ while True:
                 key = f"scalp_{COIN}_{sig['signal']}"
                 if key not in scalp_cu or (datetime.now() - scalp_cu[key]).seconds > 900:
                     scalp_cu[key] = datetime.now()
-                    icon = "🟢" if sig['signal'] == 'LONG' else "🔴"
-                    stars = "⭐⭐⭐" if sig['score'] == 3 else "⭐⭐"
+                    
                     risk = abs(sig['entry'] - sig['sl']) / sig['entry'] * 100
                     reward = abs(sig['tp'] - sig['entry']) / sig['entry'] * 100
                     rr = round(reward / risk, 1) if risk > 0 else 0
+                    entry_pct = round(abs(sig['entry'] - sig['entry']) / sig['entry'] * 100, 2)
                     
-                    msg = f"⚡ <b>SCALP {sig['signal']} - {COIN.replace('USDT','')}</b> {stars}\n"
-                    msg += f"━━━━━━━━━━━━━━━━\n"
-                    msg += f"⏱️ Khung: 15m | RSI: {sig['rsi']:.0f}\n\n"
-                    msg += f"💰 Entry: <b>${sig['entry']:,.2f}</b>\n"
-                    msg += f"🛑 SL: <b>${sig['sl']:,.2f}</b> ({risk:.2f}%)\n"
-                    msg += f"✅ TP: <b>${sig['tp']:,.2f}</b> ({reward:.2f}%)\n"
-                    msg += f"📊 R:R = <b>1:{rr}</b>\n"
-                    msg += f"⏰ {now}"
+                    stars = "⭐⭐⭐⭐" if sig['score'] == 3 else "⭐⭐⭐"
+                    action = "MUA" if sig['signal'] == "LONG" else "BÁN"
+                    order_type = "BUY LIMIT" if sig['signal'] == "LONG" else "SELL LIMIT"
+                    trend_text = "🟢 WEAK_BULLISH" if sig['trend'] == "WEAK_BULLISH" else "🔴 WEAK_BEARISH"
+                    
+                    msg = f"⚡ {COIN.replace('USDT','')} - TÍN HIỆU SCALP {'🟢' if sig['signal']=='LONG' else '🔴'} {stars}\n"
+                    msg += f"📈 SCALP ({'MẠNH' if sig['score']==3 else 'VỪA'})\n"
+                    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    msg += f"📌 Coin: {COIN}\n"
+                    msg += f"💰 Giá hiện tại: ${sig['entry']:,.2f}\n"
+                    msg += f"🎯 ĐIỂM ENTRY LÝ TƯỞNG: ${sig['entry']:,.2f}\n"
+                    msg += f"   (Cách hiện tại: {entry_pct}%)\n"
+                    msg += f"{'🟢' if sig['signal']=='LONG' else '🔴'} {action} Tín hiệu: {sig['signal']}\n"
+                    msg += f"📈 Trend: {trend_text} | RSI: {sig['rsi']:.1f} | ADX: {sig['adx']:.1f}\n"
+                    msg += f"📊 Vol: {sig['volr']:.2f}x | ATR: ${sig['atr']:,.2f}\n\n"
+                    msg += f"💡 ĐẶT LỆNH CHỜ:\n"
+                    msg += f"{'🟢' if sig['signal']=='LONG' else '🔴'} {order_type} tại ${sig['entry']:,.2f}\n"
+                    msg += f"🎯 TP: ${sig['tp']:,.2f}\n"
+                    msg += f"🛑 SL: ${sig['sl']:,.2f}\n"
+                    msg += f"📐 R:R = 1:{rr}\n\n"
+                    msg += f"⏳ CHỜ GIÁ CHẠM ${sig['entry']:,.2f} ĐỂ VÀO LỆNH!\n"
+                    msg += now_str()
                     gui(msg)
                     tracker_them(COIN, sig['signal'], sig['entry'], sig['sl'], sig['tp'], sig['tp'], "Scalp")
                     print(f"   ⚡ Scalp {COIN}: {sig['signal']} | Entry: ${sig['entry']:.2f}")
@@ -402,25 +423,43 @@ while True:
             if COIN not in tin_hieu_cu: tin_hieu_cu[COIN]=None
             
             if signal!="NEUTRAL" and signal!=tin_hieu_cu[COIN] and df_1h is not None:
-                entry,entry_name,sl,tp1,tp2=tinh_entry_sltp(df_1h,signal,supports_1h,resistances_1h)
+                entry,entry_name,sl,tp1,tp2,tp3=tinh_entry_sltp(df_1h,signal,supports_1h,resistances_1h)
                 risk=abs(entry-sl); reward=abs(tp1-entry); rr=round(reward/risk,1) if risk>0 else 0
-                icon="🟢" if signal=="LONG" else "🔴"; ten_coin=COIN.replace("USDT","")
-                trend_count=sum(1 for v in ket_qua.values() if v['che_do']=="TREND")
+                ten_coin=COIN.replace("USDT","")
+                entry_pct = round(abs(entry - gia_hien_tai) / gia_hien_tai * 100, 2)
+                entry_direction = "Hồi về hỗ trợ" if signal == "LONG" else "Hồi về kháng cự"
+                action = "MUA" if signal == "LONG" else "BÁN"
+                order_type = "BUY LIMIT" if signal == "LONG" else "SELL LIMIT"
+                trend_text = "🟢 UPTREND" if signal == "LONG" else "🔴 DOWNTREND"
+                stars = "⭐⭐⭐⭐⭐" if so_khung_L==3 or so_khung_S==3 else "⭐⭐⭐⭐"
+                rsi_val = df_1h['RSI'].iloc[-1]
+                adx_val = df_1h['ADX'].iloc[-1]
+                volr_val = df_1h['Volume_Ratio'].iloc[-1]
+                atr_val = df_1h['ATR'].iloc[-1]
                 
-                msg=f"{icon} <b>V16 {signal} - {ten_coin}</b>\n"
-                msg+=f"━━━━━━━━━━━━━━━━\n"
-                msg+=f"📊 Do manh: <b>{do_manh}</b> | {trend_count}/3 Trend\n\n"
-                msg+=f"💰 Gia hien tai: <b>${gia_hien_tai:,.0f}</b>\n"
-                msg+=f"🎯 Entry ly tuong: <b>${entry:,.0f}</b>\n   ↳ Qua: {entry_name}\n"
-                msg+=f"🛑 SL: <b>${sl:,.0f}</b>\n"
-                msg+=f"✅ TP1: <b>${tp1:,.0f}</b> | TP2: <b>${tp2:,.0f}</b>\n"
-                msg+=f"📊 R:R = <b>1:{rr}</b>\n\n"
-                msg+=f"📝 S/R khung 1h:\n"
-                if supports_1h: msg+=f"  • Supports: {', '.join([f'${s:.0f}' for s in supports_1h[:3]])}\n"
-                if resistances_1h: msg+=f"  • Resistances: {', '.join([f'${r:.0f}' for r in resistances_1h[:3]])}\n"
-                msg+=f"\n📊 Diem tung khung:\n"
-                for khung,v in ket_qua.items(): msg+=f"  • {khung}: L={v['L']}/10 S={v['S']}/10 | {v['che_do']}\n"
-                msg+=f"\n⏰ {now}"
+                msg = f"🔮 {ten_coin} 🏦 1D TÍN HIỆU CHỜ {signal} {'🟢' if signal=='LONG' else '🔴'} {stars}\n"
+                msg += f"({'Rất mạnh' if 'CUC' in do_manh else 'Mạnh'})\n"
+                msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                msg += f"📌 Coin: {COIN}\n"
+                msg += f"💰 Giá hiện tại: ${gia_hien_tai:,.2f}\n"
+                msg += f"🎯 ĐIỂM ENTRY LÝ TƯỞNG: ${entry:,.2f}\n"
+                msg += f"   ({entry_direction} {entry_name})\n"
+                msg += f"   Cách hiện tại: {entry_pct}%\n"
+                msg += f"{'🟢' if signal=='LONG' else '🔴'} {action} Tín hiệu: {signal} {'🟢' if signal=='LONG' else '🔴'}\n"
+                msg += f"📈 Trend: {trend_text} | RSI: {rsi_val:.1f} | ADX: {adx_val:.1f}\n"
+                msg += f"📊 Vol: {volr_val:.1f}x | ATR: ${atr_val:,.2f}\n"
+                msg += f"🛡️ SR: "
+                if resistances_1h: msg += f"R1=${resistances_1h[0]:,.2f}"
+                if len(resistances_1h) > 1: msg += f", R2=${resistances_1h[1]:,.2f}"
+                if supports_1h: msg += f" | S1=${supports_1h[0]:,.2f}"
+                if len(supports_1h) > 1: msg += f", S2=${supports_1h[1]:,.2f}"
+                msg += f"\n\n\n💡 ĐẶT LỆNH CHỜ:\n"
+                msg += f"{'🟢' if signal=='LONG' else '🔴'} {order_type} tại ${entry:,.2f}\n"
+                msg += f"🎯 TP1: ${tp1:,.2f} | TP2: ${tp2:,.2f} | TP3: ${tp3:,.2f}\n"
+                msg += f"🛑 SL: ${sl:,.2f}\n"
+                msg += f"📐 R:R = 1:{rr} | Risk 2% = $200\n\n"
+                msg += f"⏳ CHỜ GIÁ CHẠM ${entry:,.2f} ĐỂ VÀO LỆNH!\n"
+                msg += now_str()
                 
                 gui(msg)
                 tin_hieu_cu[COIN]=signal
