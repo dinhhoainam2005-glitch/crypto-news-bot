@@ -436,7 +436,12 @@ startup = "📰 Bot tin tuc da khoi dong!\n━" * 15 + f"\n"
 startup += f"📡 FRED: {'✅ Online' if check_fred() else '⏳ Cho Render'}\n"
 startup += f"📡 GDELT: {'✅ Online' if check_gdelt() else '⏳ Cho Render'}\n"
 startup += f"\n✅ Dang theo doi su kien..."
-gui_telegram(startup)
+# Chi gui khoi dong 1 lan
+if not os.path.exists("data/started.txt"):
+    os.makedirs("data", exist_ok=True)
+    with open("data/started.txt", "w") as f:
+        f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    gui_telegram(startup)
 
 last_lich_check = 0
 lan = 0
