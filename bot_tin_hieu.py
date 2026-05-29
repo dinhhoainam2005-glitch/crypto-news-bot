@@ -1,25 +1,27 @@
 """
-BOT HOÀN CHỈNH - ĐA COIN + ADX + SUPPORT/RESISTANCE
+BOT TIN HIEU GIAO DICH - DA KHUNG + ADX + S/R + ENTRY + SL/TP
 - 3 coin: BTC, ETH, SOL
 - 3 khung: 1h, 4h, 1d
-- ADX phân biệt Trend/Sideway
-- Support/Resistance cho Entry chính xác
-- Entry lý tưởng + SL/TP tự động
+- ADX phan biet Trend/Sideway
+- Support/Resistance cho Entry chinh xac
+- Ghi log cho Tracker
 """
 import requests
 import pandas as pd
 import numpy as np
 import time
+import json
+import os
 from datetime import datetime
 
 # ============================================
-# THAY BẰNG THÔNG TIN CỦA BẠN
+# THAY BANG THONG TIN CUA BAN
 # ============================================
-TOKEN = "THAY_TOKEN_CUA_BAN_VAO_DAY"
-CHAT_ID = "THAY_CHAT_ID_CUA_BAN_VAO_DAY"
+TOKEN = os.getenv("TELEGRAM_TOKEN", "8893995280:AAF9XwWAm9QgPkwmDrhZdY6UQ4zfySooWpk")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "518284897")
 
 # ============================================
-# CẤU HÌNH
+# CAU HINH
 # ============================================
 DANH_SACH_COIN = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 CAC_KHUNG = ["1h", "4h", "1d"]
@@ -31,22 +33,46 @@ ADX_SIDEWAY = 20
 tin_hieu_cu = {}
 
 # ============================================
-# LẤY DỮ LIỆU NẾN
+# GHI LOG CHO TRACKER
+# ============================================
+def ghi_log_tracker(coin, signal, do_manh, gia, entry, sl, tp1, tp2, rr):
+    log_file = "data/tin_hieu_log.json"
+    os.makedirs("data", exist_ok=True)
+    if os.path.exists(log_file):
+        with open(log_file, 'r') as f:
+            logs = json.load(f)
+    else:
+        logs = []
+    logs.append({
+        'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'coin': coin.replace('USDT', ''),
+        'signal': signal,
+        'do_manh': do_manh,
+        'gia': gia,
+        'entry': entry,
+        'sl': sl,
+        'tp1': tp1,
+        'tp2': tp2,
+        'rr': rr
+    })
+    logs = logs[-100:]
+    with open(log_file, 'w') as f:
+        json.dump(logs, f, ensure_ascii=False, indent=2)
+
+# ============================================
+# LAY DU LIEU NEN
 # ============================================
 def lay_nen(symbol, khung, limit=100):
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": khung, "limit": limit}
-    
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
-        
         df = pd.DataFrame(data, columns=[
             'time', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_volume', 'trades',
             'taker_buy_base', 'taker_buy_quote', 'ignore'
         ])
-        
         df['close'] = df['close'].astype(float)
         df['high'] = df['high'].astype(float)
         df['low'] = df['low'].astype(float)
@@ -56,7 +82,7 @@ def lay_nen(symbol, khung, limit=100):
         return None
 
 # ============================================
-# TÍNH CHỈ BÁO
+# TINH CHI BAO
 # ============================================
 def tinh_chi_bao(df):
     # RSI
@@ -109,40 +135,30 @@ def tinh_chi_bao(df):
     return df
 
 # ============================================
-# TÌM SUPPORT & RESISTANCE
+# TIM SUPPORT & RESISTANCE
 # ============================================
 def tim_support_resistance(df):
-    """
-    Tìm đỉnh/đáy cục bộ (swing points) làm S/R
-    Lọc bỏ các mức quá gần nhau (< 0.5%)
-    """
     supports = []
     resistances = []
     
-    # Tìm swing high và swing low (cần 2 nến 2 bên xác nhận)
     for i in range(2, len(df) - 2):
-        # Swing High: đỉnh cao hơn 2 nến trái và 2 nến phải
         if (df['high'].iloc[i] > df['high'].iloc[i-1] and 
             df['high'].iloc[i] > df['high'].iloc[i-2] and
             df['high'].iloc[i] > df['high'].iloc[i+1] and 
             df['high'].iloc[i] > df['high'].iloc[i+2]):
             resistances.append(df['high'].iloc[i])
         
-        # Swing Low: đáy thấp hơn 2 nến trái và 2 nến phải
         if (df['low'].iloc[i] < df['low'].iloc[i-1] and 
             df['low'].iloc[i] < df['low'].iloc[i-2] and
             df['low'].iloc[i] < df['low'].iloc[i+1] and 
             df['low'].iloc[i] < df['low'].iloc[i+2]):
             supports.append(df['low'].iloc[i])
     
-    # Gom nhóm các mức gần nhau (dưới 1% coi là 1 vùng)
     def gom_nhom(levels, threshold=0.01):
-        if not levels:
-            return []
+        if not levels: return []
         levels = sorted(set(levels))
         nhom = []
         nhom_hien_tai = [levels[0]]
-        
         for level in levels[1:]:
             if (level - nhom_hien_tai[-1]) / nhom_hien_tai[-1] < threshold:
                 nhom_hien_tai.append(level)
@@ -152,13 +168,12 @@ def tim_support_resistance(df):
         nhom.append(round(sum(nhom_hien_tai) / len(nhom_hien_tai), 2))
         return nhom
     
-    supports = sorted(gom_nhom(supports), reverse=True)  # Cao → Thấp
-    resistances = sorted(gom_nhom(resistances))           # Thấp → Cao
-    
+    supports = sorted(gom_nhom(supports), reverse=True)
+    resistances = sorted(gom_nhom(resistances))
     return supports, resistances
 
 # ============================================
-# PHÂN TÍCH MỘT KHUNG
+# PHAN TICH MOT KHUNG
 # ============================================
 def phan_tich_khung(df, ten_khung):
     if df is None or len(df) < 50:
@@ -184,7 +199,6 @@ def phan_tich_khung(df, ten_khung):
     diemS = 0
     ly_do = []
     
-    # RSI
     if rsi < 30:
         diemL += 3; ly_do.append(f"RSI={rsi:.0f} qua ban")
     elif rsi < 40:
@@ -194,13 +208,11 @@ def phan_tich_khung(df, ten_khung):
     elif rsi > 60:
         diemS += 1
     
-    # MA
     if ma20 > ma50:
         diemL += 2
     else:
         diemS += 2
     
-    # MACD
     if macd_prev < macd_signal_prev and macd > macd_signal:
         diemL += 3; ly_do.append("MACD cat len")
     elif macd_prev > macd_signal_prev and macd < macd_signal:
@@ -210,7 +222,6 @@ def phan_tich_khung(df, ten_khung):
     else:
         diemS += 1
     
-    # Volume
     if vol_ratio > 1.5:
         if df['close'].iloc[-1] > df['close'].iloc[-2]:
             diemL += 2; ly_do.append(f"Vol x{vol_ratio:.1f}")
@@ -222,7 +233,7 @@ def phan_tich_khung(df, ten_khung):
     return diemL, diemS, ly_do, gia, che_do
 
 # ============================================
-# TÌM ENTRY + SL/TP (CÓ S/R)
+# TIM ENTRY + SL/TP
 # ============================================
 def tinh_entry_sltp(df, signal_type, supports, resistances):
     gia = df['close'].iloc[-1]
@@ -239,14 +250,10 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
     
     if signal_type == "LONG":
         cac_muc = []
-        
-        # Thêm Support gần nhất (nếu có)
         for s in supports[:3]:
             if s < gia:
                 cac_muc.append((f"Support ${s:.0f}", s))
                 break
-        
-        # Thêm MA/EMA/BB
         if ma20 < gia: cac_muc.append(("MA20", ma20))
         if ma50 < gia: cac_muc.append(("MA50", ma50))
         if ema20 < gia: cac_muc.append(("EMA20", ema20))
@@ -257,7 +264,6 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
         else:
             entry_name, entry = "Gia -1%", gia * 0.99
         
-        # SL: dưới Support hoặc ATR
         sl_atr = entry - atr * 1.5
         sl_support = None
         for s in supports:
@@ -267,7 +273,6 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
         sl = max(sl_atr, sl_support) if sl_support else sl_atr
         sl = round(sl, 2)
         
-        # TP: trước Resistance hoặc ATR
         tp_atr = entry + atr * 2
         tp_resistance = None
         for r in resistances:
@@ -278,15 +283,12 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
         tp1 = round(tp1, 2)
         tp2 = round(entry + atr * 3, 2)
         
-    else:  # SHORT
+    else:
         cac_muc = []
-        
-        # Thêm Resistance gần nhất
         for r in resistances[:3]:
             if r > gia:
                 cac_muc.append((f"Resistance ${r:.0f}", r))
                 break
-        
         if ma20 > gia: cac_muc.append(("MA20", ma20))
         if ma50 > gia: cac_muc.append(("MA50", ma50))
         if ema20 > gia: cac_muc.append(("EMA20", ema20))
@@ -319,22 +321,21 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
     return entry, entry_name, sl, tp1, tp2
 
 # ============================================
-# GỬI TELEGRAM
+# GUI TELEGRAM
 # ============================================
-def gui_telegram(noi_dung):
+def gui_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": noi_dung, "parse_mode": "HTML"})
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
     except:
         pass
 
 # ============================================
-# CHẠY BOT
+# CHAY BOT
 # ============================================
 print("=" * 60)
-print(f"🤖 BOT HOAN CHINH - DA COIN + ADX + S/R")
+print(f"🤖 BOT TIN HIEU - {', '.join(DANH_SACH_COIN)}")
 print("=" * 60)
-print(f"📊 Coin: {', '.join(DANH_SACH_COIN)}")
 print(f"📊 Khung: {', '.join(CAC_KHUNG)}")
 print(f"🎯 ADX < {ADX_SIDEWAY}: Sideway | ADX >= {ADX_SIDEWAY}: Trend")
 print(f"🎯 Trend >= {NGUONG_DIEM_TREND}d | Sideway >= {NGUONG_DIEM_SIDEWAY}d")
@@ -342,7 +343,7 @@ print(f"🎯 Entry: S/R + MA + EMA + BB")
 print(f"⏱️  Chu ky: {CHU_KY}s")
 print("=" * 60)
 
-gui_telegram(f"🤖 Bot hoan chinh da khoi dong!\nCoin: {', '.join(DANH_SACH_COIN)}\nADX + S/R + MA + EMA + BB")
+gui_telegram(f"🤖 Bot tin hieu da khoi dong!\nTheo doi: {', '.join(DANH_SACH_COIN)}\nKhung: 1h+4h+1d\nADX + S/R + Entry ly tuong")
 
 lan = 0
 
@@ -380,17 +381,13 @@ while True:
             so_khung_S = 0
             for k, v in ket_qua.items():
                 nguong = NGUONG_DIEM_TREND if v['che_do'] == "TREND" else NGUONG_DIEM_SIDEWAY
-                if v['L'] >= nguong:
-                    so_khung_L += 1
-                if v['S'] >= nguong:
-                    so_khung_S += 1
+                if v['L'] >= nguong: so_khung_L += 1
+                if v['S'] >= nguong: so_khung_S += 1
             
             che_do_khung = [f"{k}:{v['che_do'][:1]}" for k, v in ket_qua.items()]
             sr_info = ""
-            if supports_1h:
-                sr_info += f" S:{supports_1h[0]:.0f}"
-            if resistances_1h:
-                sr_info += f" R:{resistances_1h[0]:.0f}"
+            if supports_1h: sr_info += f" S:{supports_1h[0]:.0f}"
+            if resistances_1h: sr_info += f" R:{resistances_1h[0]:.0f}"
             
             print(f"{COIN}: ${gia_hien_tai:,.0f} | L={so_khung_L}/3 S={so_khung_S}/3 | {' '.join(che_do_khung)}{sr_info}")
             
@@ -407,9 +404,7 @@ while True:
                 tin_hieu_cu[COIN] = None
             
             if signal != "NEUTRAL" and signal != tin_hieu_cu[COIN] and df_1h is not None:
-                entry, entry_name, sl, tp1, tp2 = tinh_entry_sltp(
-                    df_1h, signal, supports_1h, resistances_1h
-                )
+                entry, entry_name, sl, tp1, tp2 = tinh_entry_sltp(df_1h, signal, supports_1h, resistances_1h)
                 
                 risk = abs(entry - sl)
                 reward = abs(tp1 - entry)
@@ -440,13 +435,17 @@ while True:
                 
                 gui_telegram(msg)
                 tin_hieu_cu[COIN] = signal
+                
+                # GHI LOG CHO TRACKER
+                ghi_log_tracker(COIN, signal, do_manh, gia_hien_tai, entry, sl, tp1, tp2, rr)
+                
                 print(f"   ✅ {ten_coin}: {signal} - {do_manh} | Entry: ${entry:.0f}")
         
         time.sleep(CHU_KY)
         
     except KeyboardInterrupt:
         print("\n👋 Bot da dung!")
-        gui_telegram("🛑 Bot da dung")
+        gui_telegram("🛑 Bot tin hieu da dung")
         break
     except Exception as e:
         print(f"❌ Loi: {e}")
