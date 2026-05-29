@@ -160,7 +160,6 @@ print("=" * 40)
 
 while True:
     try:
-        global da_khoi_dong, last_lich
         if not da_khoi_dong:
             da_khoi_dong = True
             gui(f"📰 Bot tin tuc da khoi dong!\n━" * 15 + f"\n📡 FRED: {'✅ Online' if check_fred() else '⏳ Offline'}\n📡 GDELT: {'✅ Online' if check_gdelt() else '⏳ Offline'}\n\n✅ Dang theo doi su kien...")
