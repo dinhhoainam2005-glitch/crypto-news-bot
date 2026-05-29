@@ -1,8 +1,9 @@
 """
-BOT TRACKER - GHI CHEP & THONG KE HIEU SUAT TIN HIEU
-- Tu dong ghi nhan tin hieu LONG/SHORT
-- Cho phep danh dau DUNG/SAI qua Telegram
-- Thong ke win rate theo coin, theo thoi gian
+BOT TRACKER - TU DONG THEO DOI TIN HIEU + BAO CAO 12H
+- Theo doi gia real-time sau khi co tin hieu
+- Tu dong danh dau DUNG/SAI khi cham TP/SL
+- Gui Telegram ngay khi co ket qua
+- Bao cao hieu suat moi 12h
 """
 import requests
 import time
@@ -15,6 +16,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "518284897")
 
 DATA_DIR = "data"
 TRADE_FILE = f"{DATA_DIR}/trades.json"
+SIGNAL_FILE = f"{DATA_DIR}/tin_hieu_log.json"
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -34,185 +36,192 @@ def gui(msg):
                      data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
     except: pass
 
-# ===== XU LY LENH =====
-def process_command(text):
-    text = text.strip().lower()
-    
-    # /dung 5 -> danh dau tin hieu #5 la DUNG
-    if text.startswith('/dung'):
-        try:
-            idx = int(text.replace('/dung', '').strip()) - 1
-            trades = load_trades()
-            if 0 <= idx < len(trades):
-                trades[idx]['result'] = 'DUNG'
-                save_trades(trades)
-                t = trades[idx]
-                return f"✅ <b>#{idx+1} ĐÃ ĐÁNH DẤU ĐÚNG</b>\n{t['coin']} {t['signal']} | Entry: ${t['entry']:,.0f}"
-            return "❌ Số thứ tự không hợp lệ"
-        except:
-            return "❌ Dùng: /dung [số]"
-    
-    # /sai 5 -> danh dau tin hieu #5 la SAI
-    if text.startswith('/sai'):
-        try:
-            idx = int(text.replace('/sai', '').strip()) - 1
-            trades = load_trades()
-            if 0 <= idx < len(trades):
-                trades[idx]['result'] = 'SAI'
-                save_trades(trades)
-                t = trades[idx]
-                return f"❌ <b>#{idx+1} ĐÃ ĐÁNH DẤU SAI</b>\n{t['coin']} {t['signal']} | Entry: ${t['entry']:,.0f}"
-            return "❌ Số thứ tự không hợp lệ"
-        except:
-            return "❌ Dùng: /sai [số]"
-    
-    # /ds -> xem danh sach tin hieu chua danh gia
-    if text == '/ds':
-        trades = load_trades()
-        pending = [(i, t) for i, t in enumerate(trades) if t.get('result') == 'CHO']
-        if not pending:
-            return "📋 Không có tín hiệu nào chờ đánh giá"
-        
-        msg = f"📋 <b>{len(pending)} TÍN HIỆU CHỜ ĐÁNH GIÁ</b>\n━━━━━━━━━━━━━━━━━━\n"
-        for i, t in pending[:10]:
-            msg += f"#{i+1} | {t['time'][:16]} | {t['coin']} {t['signal']} | Entry: ${t['entry']:,.0f}\n"
-        if len(pending) > 10:
-            msg += f"\n... còn {len(pending)-10} tín hiệu"
-        msg += f"\n\n💡 /dung [số] hoặc /sai [số] để đánh giá"
-        return msg
-    
-    # /tk -> thong ke
-    if text == '/tk':
-        trades = load_trades()
-        done = [t for t in trades if t.get('result') != 'CHO']
-        if not done:
-            return "📊 Chưa có tín hiệu nào được đánh giá"
-        
-        dung = sum(1 for t in done if t['result'] == 'DUNG')
-        sai = sum(1 for t in done if t['result'] == 'SAI')
-        total = len(done)
-        win_rate = dung / total * 100 if total > 0 else 0
-        
-        # Thong ke theo coin
-        coins = {}
-        for t in done:
-            coin = t['coin']
-            if coin not in coins:
-                coins[coin] = {'dung': 0, 'sai': 0}
-            if t['result'] == 'DUNG':
-                coins[coin]['dung'] += 1
-            else:
-                coins[coin]['sai'] += 1
-        
-        msg = f"📊 <b>THỐNG KÊ HIỆU SUẤT</b>\n━━━━━━━━━━━━━━━━━━\n"
-        msg += f"✅ Đúng: <b>{dung}</b> | ❌ Sai: <b>{sai}</b>\n"
-        msg += f"📈 Win Rate: <b>{win_rate:.1f}%</b>\n"
-        msg += f"📋 Tổng: <b>{total}</b> tín hiệu đã đánh giá\n\n"
-        msg += f"📊 <b>Theo Coin:</b>\n"
-        for coin, stats in coins.items():
-            total_c = stats['dung'] + stats['sai']
-            wr_c = stats['dung'] / total_c * 100 if total_c > 0 else 0
-            msg += f"• {coin}: {stats['dung']}/{total_c} ({wr_c:.0f}%)\n"
-        
-        return msg
-    
-    # /help
-    if text == '/help':
-        return (
-            "📋 <b>BOT TRACKER - HƯỚNG DẪN</b>\n━━━━━━━━━━━━━━━━━━\n"
-            "/ds - Xem tín hiệu chờ đánh giá\n"
-            "/dung [số] - Đánh dấu ĐÚNG\n"
-            "/sai [số] - Đánh dấu SAI\n"
-            "/tk - Xem thống kê\n"
-            "/help - Hướng dẫn"
-        )
-    
-    return None
+# ===== LAY GIA HIEN TAI =====
+def get_price(coin):
+    try:
+        r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={coin}USDT", timeout=5)
+        return float(r.json()['price'])
+    except:
+        return None
 
-# ===== DOC TIN HIEU TU BOT TIN HIEU =====
-def check_new_signals():
-    """Đọc tín hiệu từ file log của bot tín hiệu"""
-    signal_file = "data/tin_hieu_log.json"
-    if not os.path.exists(signal_file):
-        return
-    
-    with open(signal_file, 'r', encoding='utf-8') as f:
-        signals = json.load(f)
-    
+# ===== DOC TIN HIEU MOI =====
+def load_signals():
+    if os.path.exists(SIGNAL_FILE):
+        with open(SIGNAL_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+# ===== THEO DOI TIN HIEU =====
+def theo_doi_tin_hieu():
+    signals = load_signals()
     trades = load_trades()
     existing_times = [t['time'] for t in trades]
+    updated = False
     
-    new_count = 0
+    # Them tin hieu moi vao theo doi
     for sig in signals:
         if sig['time'] not in existing_times:
             trades.append({
                 'time': sig['time'],
                 'coin': sig['coin'],
                 'signal': sig['signal'],
-                'gia': sig['gia'],
                 'entry': sig['entry'],
                 'sl': sig['sl'],
                 'tp1': sig['tp1'],
-                'tp2': sig['tp2'],
-                'rr': sig['rr'],
-                'do_manh': sig.get('do_manh', ''),
-                'result': 'CHO'
+                'tp2': sig.get('tp2', 0),
+                'gia_hien_tai': sig['gia'],
+                'result': 'CHO',
+                'exit_price': 0,
+                'exit_time': '',
+                'pnl': 0
             })
-            new_count += 1
+            updated = True
     
-    if new_count > 0:
+    # Kiem tra cac tin hieu CHO
+    for t in trades:
+        if t['result'] != 'CHO':
+            continue
+        
+        price = get_price(t['coin'])
+        if price is None:
+            continue
+        
+        signal = t['signal']
+        tp = t['tp1']
+        sl = t['sl']
+        entry = t['entry']
+        
+        hit = False
+        
+        if signal == 'LONG':
+            if price >= tp:
+                t['result'] = 'DUNG'
+                t['exit_price'] = tp
+                t['pnl'] = round((tp - entry) / entry * 100, 2)
+                hit = True
+            elif price <= sl:
+                t['result'] = 'SAI'
+                t['exit_price'] = sl
+                t['pnl'] = round((sl - entry) / entry * 100, 2)
+                hit = True
+        else:  # SHORT
+            if price <= tp:
+                t['result'] = 'DUNG'
+                t['exit_price'] = tp
+                t['pnl'] = round((entry - tp) / entry * 100, 2)
+                hit = True
+            elif price >= sl:
+                t['result'] = 'SAI'
+                t['exit_price'] = sl
+                t['pnl'] = round((entry - sl) / entry * 100, 2)
+                hit = True
+        
+        if hit:
+            t['exit_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            updated = True
+            
+            # Gui Telegram ngay
+            icon = "✅" if t['result'] == 'DUNG' else "❌"
+            emoji = "🎉" if t['result'] == 'DUNG' else "😞"
+            
+            msg = f"{icon} <b>TIN HIEU {t['result']}</b> {emoji}\n"
+            msg += f"━━━━━━━━━━━━━━━━\n"
+            msg += f"📊 {t['coin']} {t['signal']}\n"
+            msg += f"💰 Entry: <b>${t['entry']:,.2f}</b>\n"
+            msg += f"🎯 Thoat: <b>${t['exit_price']:,.2f}</b>\n"
+            msg += f"📈 PnL: <b>{t['pnl']:+.2f}%</b>\n"
+            msg += f"⏰ {t['exit_time']}"
+            gui(msg)
+    
+    if updated:
         save_trades(trades)
-        print(f"📊 Thêm {new_count} tín hiệu mới")
 
-# ===== DOC LENH TELEGRAM =====
-def get_updates(offset=None):
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-        params = {'timeout': 30, 'allowed_updates': ['message']}
-        if offset:
-            params['offset'] = offset
-        r = requests.get(url, params=params, timeout=35)
-        if r.status_code == 200:
-            return r.json().get('result', [])
-    except:
-        pass
-    return []
+# ===== BAO CAO 12H =====
+_last_report = 0
 
-# === MAIN ===
+def bao_cao_12h():
+    global _last_report
+    now = time.time()
+    
+    if now - _last_report < 43200:  # 12h = 43200s
+        return
+    
+    _last_report = now
+    trades = load_trades()
+    done = [t for t in trades if t['result'] != 'CHO']
+    
+    if not done:
+        return
+    
+    dung = sum(1 for t in done if t['result'] == 'DUNG')
+    sai = sum(1 for t in done if t['result'] == 'SAI')
+    total = len(done)
+    win_rate = dung / total * 100 if total > 0 else 0
+    total_pnl = sum(t['pnl'] for t in done)
+    
+    # Theo coin
+    coins = {}
+    for t in done:
+        c = t['coin']
+        if c not in coins:
+            coins[c] = {'dung': 0, 'sai': 0, 'pnl': 0}
+        if t['result'] == 'DUNG':
+            coins[c]['dung'] += 1
+        else:
+            coins[c]['sai'] += 1
+        coins[c]['pnl'] += t['pnl']
+    
+    # 12h gan nhat
+    cutoff = (datetime.now() - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+    recent = [t for t in done if t.get('exit_time', '') >= cutoff]
+    recent_dung = sum(1 for t in recent if t['result'] == 'DUNG')
+    recent_sai = sum(1 for t in recent if t['result'] == 'SAI')
+    recent_total = len(recent)
+    recent_wr = recent_dung / recent_total * 100 if recent_total > 0 else 0
+    recent_pnl = sum(t['pnl'] for t in recent)
+    
+    msg = f"📊 <b>BAO CAO HIEU SUAT 12H</b>\n"
+    msg += f"━━━━━━━━━━━━━━━━\n"
+    msg += f"⏰ {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}\n\n"
+    
+    msg += f"📈 <b>12H QUA:</b>\n"
+    msg += f"✅ Đúng: <b>{recent_dung}</b> | ❌ Sai: <b>{recent_sai}</b>\n"
+    msg += f"📊 Win Rate: <b>{recent_wr:.1f}%</b>\n"
+    msg += f"💰 PnL: <b>{recent_pnl:+.2f}%</b>\n\n"
+    
+    msg += f"📊 <b>TONG KET:</b>\n"
+    msg += f"✅ Đúng: <b>{dung}</b> | ❌ Sai: <b>{sai}</b>\n"
+    msg += f"📊 Win Rate: <b>{win_rate:.1f}%</b>\n"
+    msg += f"💰 Tong PnL: <b>{total_pnl:+.2f}%</b>\n\n"
+    
+    msg += f"📊 <b>THEO COIN:</b>\n"
+    for c, s in coins.items():
+        t = s['dung'] + s['sai']
+        wr = s['dung'] / t * 100 if t > 0 else 0
+        msg += f"• {c}: {s['dung']}/{t} ({wr:.0f}%) | PnL: {s['pnl']:+.2f}%\n"
+    
+    # Dang theo doi
+    pending = [t for t in trades if t['result'] == 'CHO']
+    if pending:
+        msg += f"\n⏳ <b>DANG THEO DOI:</b> {len(pending)} tin hieu"
+    
+    gui(msg)
+
+# ===== MAIN =====
 print("=" * 50)
-print("📊 BOT TRACKER")
+print("📊 BOT TRACKER - TU DONG THEO DOI")
 print("=" * 50)
 
-gui("📊 <b>Bot Tracker đã khởi động!</b>\n━━━━━━━━━━━━━━━━━━\n/ds - Xem tín hiệu chờ\n/tk - Thống kê\n/help - Hướng dẫn")
-
-last_update_id = 0
-last_signal_check = 0
+gui("📊 <b>Bot Tracker da khoi dong!</b>\n✅ Tu dong theo doi tin hieu\n📊 Bao cao moi 12h")
 
 while True:
     try:
-        # Kiểm tra tín hiệu mới mỗi 5 phút
-        if time.time() - last_signal_check >= 300:
-            last_signal_check = time.time()
-            check_new_signals()
-        
-        # Đọc lệnh Telegram
-        updates = get_updates(last_update_id + 1)
-        for u in updates:
-            last_update_id = u['update_id']
-            msg = u.get('message', {})
-            text = msg.get('text', '')
-            chat_id = str(msg.get('chat', {}).get('id', ''))
-            
-            # Chỉ phản hồi chat của bạn
-            if chat_id == CHAT_ID:
-                reply = process_command(text)
-                if reply:
-                    gui(reply)
-        
-        time.sleep(2)
+        theo_doi_tin_hieu()
+        bao_cao_12h()
+        time.sleep(30)  # Kiem tra moi 30 giay
     except KeyboardInterrupt:
-        print("👋 Dừng")
+        print("👋 Dung")
         break
     except Exception as e:
-        print(f"Lỗi: {e}")
-        time.sleep(10)
+        print(f"Loi: {e}")
+        time.sleep(30)
