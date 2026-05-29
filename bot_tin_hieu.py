@@ -1,10 +1,9 @@
 """
-BOT TIN HIEU GIAO DICH - DA KHUNG + ADX + S/R + ENTRY + SL/TP
-- 3 coin: BTC, ETH, SOL
-- 3 khung: 1h, 4h, 1d
-- ADX phan biet Trend/Sideway
-- Support/Resistance cho Entry chinh xac
-- Ghi log cho Tracker
+BOT TIN HIEU GIAO DICH + TRACKER - FULL
+- 3 coin: BTC, ETH, SOL | 3 khung: 1h, 4h, 1d
+- ADX + S/R + Entry ly tuong + SL/TP
+- Hien thi chi tiet S/R, diem tung khung
+- Tracker tu dong theo doi + bao cao 12h
 """
 import requests
 import pandas as pd
@@ -12,17 +11,11 @@ import numpy as np
 import time
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# ============================================
-# THAY BANG THONG TIN CUA BAN
-# ============================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "8893995280:AAF9XwWAm9QgPkwmDrhZdY6UQ4zfySooWpk")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "518284897")
 
-# ============================================
-# CAU HINH
-# ============================================
 DANH_SACH_COIN = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 CAC_KHUNG = ["1h", "4h", "1d"]
 CHU_KY = 300
@@ -31,33 +24,114 @@ NGUONG_DIEM_SIDEWAY = 5
 ADX_SIDEWAY = 20
 
 tin_hieu_cu = {}
+TRACKER_FILE = "data/trades.json"
+_last_report = 0
+os.makedirs("data", exist_ok=True)
 
 # ============================================
-# GHI LOG CHO TRACKER
+# GUI TELEGRAM
 # ============================================
-def ghi_log_tracker(coin, signal, do_manh, gia, entry, sl, tp1, tp2, rr):
-    log_file = "data/tin_hieu_log.json"
-    os.makedirs("data", exist_ok=True)
-    if os.path.exists(log_file):
-        with open(log_file, 'r') as f:
-            logs = json.load(f)
-    else:
-        logs = []
-    logs.append({
+def gui(msg):
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                     data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+    except: pass
+
+# ============================================
+# TRACKER
+# ============================================
+def _t_load():
+    if os.path.exists(TRACKER_FILE):
+        with open(TRACKER_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+    return []
+
+def _t_save(trades):
+    with open(TRACKER_FILE, 'w', encoding='utf-8') as f: json.dump(trades, f, ensure_ascii=False, indent=2)
+
+def _t_price(coin):
+    try:
+        r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={coin}USDT", timeout=5)
+        return float(r.json()['price'])
+    except: return None
+
+def tracker_them(coin, signal, entry, sl, tp1, tp2):
+    trades = _t_load()
+    trades.append({
         'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'coin': coin.replace('USDT', ''),
-        'signal': signal,
-        'do_manh': do_manh,
-        'gia': gia,
-        'entry': entry,
-        'sl': sl,
-        'tp1': tp1,
-        'tp2': tp2,
-        'rr': rr
+        'coin': coin.replace('USDT', ''), 'signal': signal,
+        'entry': entry, 'sl': sl, 'tp1': tp1, 'tp2': tp2,
+        'result': 'CHO', 'exit_price': 0, 'exit_time': '', 'pnl': 0
     })
-    logs = logs[-100:]
-    with open(log_file, 'w') as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
+    _t_save(trades)
+
+def tracker_check():
+    trades = _t_load()
+    updated = False
+    for t in trades:
+        if t.get('result') != 'CHO': continue
+        price = _t_price(t['coin'])
+        if price is None: continue
+        hit = False
+        if t['signal'] == 'LONG':
+            if price >= t['tp1']:
+                t['result'] = 'DUNG'; t['exit_price'] = t['tp1']
+                t['pnl'] = round((t['tp1'] - t['entry']) / t['entry'] * 100, 2)
+                hit = True
+            elif price <= t['sl']:
+                t['result'] = 'SAI'; t['exit_price'] = t['sl']
+                t['pnl'] = round((t['sl'] - t['entry']) / t['entry'] * 100, 2)
+                hit = True
+        else:
+            if price <= t['tp1']:
+                t['result'] = 'DUNG'; t['exit_price'] = t['tp1']
+                t['pnl'] = round((t['entry'] - t['tp1']) / t['entry'] * 100, 2)
+                hit = True
+            elif price >= t['sl']:
+                t['result'] = 'SAI'; t['exit_price'] = t['sl']
+                t['pnl'] = round((t['entry'] - t['sl']) / t['entry'] * 100, 2)
+                hit = True
+        if hit:
+            t['exit_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            updated = True
+            icon = "✅" if t['result'] == 'DUNG' else "❌"
+            e = "🎉" if t['result'] == 'DUNG' else "😞"
+            gui(f"{icon} <b>KET QUA: {t['result']}</b> {e}\n━━━━━━━━━━━━━━━━\n📊 {t['coin']} {t['signal']}\n💰 Entry: <b>${t['entry']:,.2f}</b>\n🎯 Thoat: <b>${t['exit_price']:,.2f}</b>\n📈 PnL: <b>{t['pnl']:+.2f}%</b>\n⏰ {t['exit_time']}")
+    if updated: _t_save(trades)
+
+def tracker_report():
+    global _last_report
+    now = time.time()
+    if now - _last_report < 43200: return
+    _last_report = now
+    trades = _t_load()
+    done = [t for t in trades if t.get('result') != 'CHO']
+    if not done: return
+    dung = sum(1 for t in done if t['result'] == 'DUNG')
+    sai = sum(1 for t in done if t['result'] == 'SAI')
+    total = len(done)
+    wr = dung / total * 100 if total > 0 else 0
+    total_pnl = sum(t.get('pnl', 0) for t in done)
+    coins = {}
+    for t in done:
+        c = t['coin']
+        if c not in coins: coins[c] = {'dung': 0, 'sai': 0, 'pnl': 0}
+        if t['result'] == 'DUNG': coins[c]['dung'] += 1
+        else: coins[c]['sai'] += 1
+        coins[c]['pnl'] += t.get('pnl', 0)
+    cutoff = (datetime.now() - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+    recent = [t for t in done if t.get('exit_time', '') >= cutoff]
+    r_dung = sum(1 for t in recent if t['result'] == 'DUNG')
+    r_sai = sum(1 for t in recent if t['result'] == 'SAI')
+    r_total = len(recent)
+    r_wr = r_dung / r_total * 100 if r_total > 0 else 0
+    r_pnl = sum(t.get('pnl', 0) for t in recent)
+    msg = f"📊 <b>BAO CAO HIEU SUAT 12H</b>\n━━━━━━━━━━━━━━━━\n⏰ {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}\n\n📈 <b>12H QUA:</b>\n✅ Đúng: <b>{r_dung}</b> | ❌ Sai: <b>{r_sai}</b>\n📊 Win Rate: <b>{r_wr:.1f}%</b>\n💰 PnL: <b>{r_pnl:+.2f}%</b>\n\n📊 <b>TONG:</b>\n✅ Đúng: <b>{dung}</b> | ❌ Sai: <b>{sai}</b>\n📊 Win Rate: <b>{wr:.1f}%</b>\n💰 Tong PnL: <b>{total_pnl:+.2f}%</b>\n\n📊 <b>THEO COIN:</b>\n"
+    for c, s in coins.items():
+        t = s['dung'] + s['sai']; w = s['dung'] / t * 100 if t > 0 else 0
+        msg += f"• {c}: {s['dung']}/{t} ({w:.0f}%) | PnL: {s['pnl']:+.2f}%\n"
+    pending = [t for t in trades if t.get('result') == 'CHO']
+    if pending: msg += f"\n⏳ <b>DANG THEO DOI:</b> {len(pending)} tin hieu"
+    gui(msg)
 
 # ============================================
 # LAY DU LIEU NEN
@@ -321,29 +395,20 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
     return entry, entry_name, sl, tp1, tp2
 
 # ============================================
-# GUI TELEGRAM
-# ============================================
-def gui_telegram(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
-    except:
-        pass
-
-# ============================================
 # CHAY BOT
 # ============================================
 print("=" * 60)
-print(f"🤖 BOT TIN HIEU - {', '.join(DANH_SACH_COIN)}")
+print(f"🤖 BOT TIN HIEU + TRACKER - {', '.join(DANH_SACH_COIN)}")
 print("=" * 60)
 print(f"📊 Khung: {', '.join(CAC_KHUNG)}")
 print(f"🎯 ADX < {ADX_SIDEWAY}: Sideway | ADX >= {ADX_SIDEWAY}: Trend")
 print(f"🎯 Trend >= {NGUONG_DIEM_TREND}d | Sideway >= {NGUONG_DIEM_SIDEWAY}d")
 print(f"🎯 Entry: S/R + MA + EMA + BB")
 print(f"⏱️  Chu ky: {CHU_KY}s")
+print(f"📊 Tracker: Tu dong + Bao cao 12h")
 print("=" * 60)
 
-gui_telegram(f"🤖 Bot tin hieu da khoi dong!\nTheo doi: {', '.join(DANH_SACH_COIN)}\nKhung: 1h+4h+1d\nADX + S/R + Entry ly tuong")
+gui(f"🤖 Bot tin hieu + Tracker da khoi dong!\nTheo doi: {', '.join(DANH_SACH_COIN)}\nKhung: 1h+4h+1d\nADX + S/R + Entry ly tuong\n📊 Tu dong theo doi + Bao cao 12h")
 
 lan = 0
 
@@ -433,19 +498,18 @@ while True:
                     msg += f"  • {khung}: L={v['L']}/10 S={v['S']}/10 | {v['che_do']}\n"
                 msg += f"\n⏰ {now}"
                 
-                gui_telegram(msg)
+                gui(msg)
                 tin_hieu_cu[COIN] = signal
-                
-                # GHI LOG CHO TRACKER
-                ghi_log_tracker(COIN, signal, do_manh, gia_hien_tai, entry, sl, tp1, tp2, rr)
-                
+                tracker_them(COIN, signal, entry, sl, tp1, tp2)
                 print(f"   ✅ {ten_coin}: {signal} - {do_manh} | Entry: ${entry:.0f}")
         
+        tracker_check()
+        tracker_report()
         time.sleep(CHU_KY)
         
     except KeyboardInterrupt:
         print("\n👋 Bot da dung!")
-        gui_telegram("🛑 Bot tin hieu da dung")
+        gui("🛑 Bot tin hieu da dung")
         break
     except Exception as e:
         print(f"❌ Loi: {e}")
