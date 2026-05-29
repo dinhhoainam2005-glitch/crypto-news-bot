@@ -1,9 +1,8 @@
 """
-BOT TIN TUC - NEWSAPI + FRED - DU LIEU THAT 100%
-- 100% tin thật từ NewsAPI (80.000+ nguồn)
-- Lọc bỏ nguồn kém uy tín
-- Có ngày đăng tin
-- FRED API dữ liệu kinh tế thật
+BOT TIN TUC - NEWSAPI + FRED - PRO FILTER
+- Từ khóa KINH TẾ + ĐỊA CHÍNH TRỊ quan trọng nhất
+- Tối đa 8 tin/lần gửi
+- Có ngày đăng + nguồn
 - 6h cập nhật 1 lần
 """
 import requests
@@ -18,12 +17,12 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "ff3e122af2b2c0a433606476fc6dc5fb")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "bcdf1d28d8bd401f9eb1978268efeb53")
 
 CHU_KY = 21600
+MAX_NEWS = 8
 DATA_DIR = "data"
 STATE_FILE = f"{DATA_DIR}/state.json"
 LOG_FILE = f"{DATA_DIR}/log.json"
 
-# Nguồn kém uy tín - loại bỏ
-BLOCKED_SOURCES = ["naturalnews.com", "naturalnews", "beforeitsnews.com", "infowars.com", "zerohedge.com"]
+BLOCKED_SOURCES = ["naturalnews.com", "naturalnews", "beforeitsnews.com", "infowars.com", "zerohedge.com", "activistpost.com", "globalresearch.ca", "nakedcapitalism.com"]
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -79,30 +78,65 @@ def econ_summary():
 
 def dich_tieng_viet(text):
     try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        r = requests.get(url, params={'client':'gtx','sl':'en','tl':'vi','dt':'t','q':text}, timeout=5)
+        r = requests.get("https://translate.googleapis.com/translate_a/single",
+                        params={'client':'gtx','sl':'en','tl':'vi','dt':'t','q':text}, timeout=5)
         if r.status_code == 200:
             return ''.join([s[0] for s in r.json()[0] if s[0]])
     except: pass
     return text
 
 def format_date(date_str):
-    """Format ngày đăng tin"""
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
         return dt.strftime("%d/%m/%Y %H:%M UTC")
-    except:
-        return date_str
+    except: return date_str
 
-POSITIVE_KW = ["ceasefire","peace deal","peace talk","truce","surrender","withdraw","rate cut","dovish","easing","stimulus","bull market","rally","surge","breakout","adoption","partnership","approved","breakthrough","agreement","deal","resolved","upward","record high","outperform"]
-NEGATIVE_KW = ["war","invasion","strike","missile","bomb","airstrike","offensive","nuclear","sanction","embargo","tariff","trade war","crash","recession","depression","meltdown","plunge","collapse","rate hike","hawkish","tighten","inflation surge","crackdown","ban","delist","lawsuit","sec charge","fraud","tension","escalation","conflict","attack","casualty","oil price surge","supply shock","shortage","crisis"]
+# ===== TỪ KHÓA QUAN TRỌNG NHẤT =====
+POSITIVE_KW = [
+    "rate cut", "dovish", "easing", "ceasefire", "peace deal", "peace talk",
+    "truce", "surrender", "withdraw", "bull market", "rally", "etf approved",
+    "etf inflow", "blackrock", "institutional", "adoption", "partnership"
+]
 
-DICH_KW = {"ceasefire":"ngừng bắn","peace deal":"thỏa thuận hòa bình","peace talk":"đàm phán hòa bình","truce":"đình chiến","surrender":"đầu hàng","withdraw":"rút quân","rate cut":"hạ lãi suất","dovish":"ôn hòa","easing":"nới lỏng","bull market":"thị trường tăng","rally":"tăng mạnh","surge":"tăng vọt","deal":"thỏa thuận","agreement":"đồng thuận","partnership":"hợp tác","war":"chiến tranh","invasion":"xâm lược","strike":"không kích","missile":"tên lửa","bomb":"ném bom","airstrike":"không kích","offensive":"tấn công","nuclear":"hạt nhân","sanction":"trừng phạt","embargo":"cấm vận","tariff":"thuế quan","trade war":"chiến tranh thương mại","crash":"sụp đổ","recession":"suy thoái","depression":"đại suy thoái","collapse":"sụp đổ","rate hike":"tăng lãi suất","hawkish":"diều hâu","crackdown":"đàn áp","ban":"cấm","lawsuit":"kiện tụng","tension":"căng thẳng","escalation":"leo thang","conflict":"xung đột","attack":"tấn công","casualty":"thương vong","crisis":"khủng hoảng","oil price surge":"giá dầu tăng vọt"}
+NEGATIVE_KW = [
+    "war", "strike", "missile", "bomb", "airstrike", "attack", "invasion",
+    "offensive", "nuclear", "sanction", "embargo", "tariff", "trade war",
+    "rate hike", "hawkish", "tighten", "recession", "depression", "crash",
+    "collapse", "oil price surge", "crude surge", "etf outflow", "hormuz"
+]
+
+DICH_KW = {
+    "rate cut":"hạ lãi suất","dovish":"ôn hòa","easing":"nới lỏng",
+    "ceasefire":"ngừng bắn","peace deal":"thỏa thuận hòa bình","peace talk":"đàm phán hòa bình",
+    "truce":"đình chiến","surrender":"đầu hàng","withdraw":"rút quân",
+    "bull market":"thị trường tăng","rally":"tăng mạnh","etf approved":"ETF được duyệt",
+    "etf inflow":"dòng tiền ETF vào","blackrock":"BlackRock","institutional":"tổ chức",
+    "adoption":"chấp nhận","partnership":"hợp tác",
+    "war":"chiến tranh","strike":"không kích","missile":"tên lửa","bomb":"ném bom",
+    "airstrike":"không kích","attack":"tấn công","invasion":"xâm lược","offensive":"tấn công",
+    "nuclear":"hạt nhân","sanction":"trừng phạt","embargo":"cấm vận","tariff":"thuế quan",
+    "trade war":"chiến tranh thương mại","rate hike":"tăng lãi suất","hawkish":"diều hâu",
+    "tighten":"thắt chặt","recession":"suy thoái","depression":"đại suy thoái",
+    "crash":"sụp đổ","collapse":"sụp đổ","oil price surge":"giá dầu tăng vọt",
+    "crude surge":"dầu thô tăng","etf outflow":"dòng tiền ETF ra","hormuz":"Hormuz"
+}
 
 def phan_tich_tin(title, description=""):
     t = (title + " " + description).lower()
+    
+    # Bỏ qua tin không có từ khóa quan trọng
     pos_found = [DICH_KW.get(kw, kw) for kw in POSITIVE_KW if kw in t]
     neg_found = [DICH_KW.get(kw, kw) for kw in NEGATIVE_KW if kw in t]
+    
+    if not pos_found and not neg_found:
+        return None
+    
+    # AI Context: chiến tranh + dầu = TIÊU CỰC
+    has_war = any(w in t for w in ['war', 'strike', 'airstrike', 'attack', 'invasion', 'chiến tranh', 'không kích', 'tấn công'])
+    has_oil = any(w in t for w in ['oil price surge', 'crude surge', 'giá dầu', 'dầu thô'])
+    if has_war and has_oil:
+        neg_found.append("giá dầu tăng (do chiến tranh)")
+        pos_found = [p for p in pos_found if p not in ['thỏa thuận', 'đồng thuận', 'ngừng bắn', 'đình chiến']]
     
     if len(neg_found) > len(pos_found):
         if len(neg_found) >= 3: loai = "🔴🔴🔴 <b>CỰC KỲ TIÊU CỰC</b>"
@@ -128,13 +162,13 @@ def phan_tich_tin(title, description=""):
     return {'loai': loai, 'gold': gold, 'crypto': crypto, 'usd': usd, 'advice': advice, 'keywords': keywords}
 
 QUERIES = [
-    "iran israel war conflict strike",
+    "iran israel war strike",
     "russia ukraine war nato",
-    "fed interest rate inflation cpi",
-    "trade war tariff sanction",
-    "oil price crude supply shock",
+    "fed interest rate inflation",
+    "trade war tariff",
+    "oil price crude hormuz",
     "stock market crash recession",
-    "crypto bitcoin regulation sec",
+    "crypto bitcoin etf regulation",
     "gold price safe haven"
 ]
 
@@ -146,7 +180,7 @@ def fetch_news():
         try:
             r = requests.get("https://newsapi.org/v2/everything", params={
                 'q': query, 'language': 'en', 'sortBy': 'publishedAt',
-                'pageSize': 5, 'apiKey': NEWS_API_KEY
+                'pageSize': 3, 'apiKey': NEWS_API_KEY
             }, timeout=10)
             if r.status_code != 200: continue
             
@@ -155,10 +189,7 @@ def fetch_news():
                 if url_news in log['news_sent']: continue
                 
                 source_name = (a.get('source', {}) or {}).get('name', 'Unknown')
-                
-                # Bỏ qua nguồn kém uy tín
-                if any(b in source_name.lower() for b in BLOCKED_SOURCES):
-                    continue
+                if any(b in source_name.lower() for b in BLOCKED_SOURCES): continue
                 
                 title = a.get('title', '')
                 description = a.get('description', '') or ''
@@ -176,15 +207,16 @@ def fetch_news():
                     'crypto': result['crypto'], 'usd': result['usd'],
                     'advice': result['advice'], 'keywords': result['keywords']
                 })
-            time.sleep(0.5)
+            time.sleep(0.3)
         except: continue
     
-    log['news_sent'] = log['news_sent'][-500:]
+    log['news_sent'] = log['news_sent'][-300:]
     save_log(log)
     
-    priority = {'CỰC KỲ TIÊU CỰC':0,'RẤT TIÊU CỰC':1,'TIÊU CỰC':2,'TÍCH CỰC':3,'RẤT TÍCH CỰC':4,'CỰC KỲ TÍCH CỰC':5}
+    # Sắp xếp tiêu cực trước, giới hạn MAX_NEWS
+    priority = {'CỰC KỲ TIÊU CỰC':0,'RẤT TIÊU CỰC':1,'TIÊU CỰC':2,'TÍCH CỰC':3,'TÍCH CỰC':3,'CỰC KỲ TÍCH CỰC':5}
     all_news.sort(key=lambda x: priority.get(x['loai'].split()[-1] if 'CỰC' in x['loai'] else x['loai'].split()[-1], 3))
-    return all_news
+    return all_news[:MAX_NEWS]
 
 def market_summary(news_list):
     if not news_list: return None
@@ -198,7 +230,7 @@ def market_summary(news_list):
     
     all_kw = []
     for n in news_list: all_kw.extend(n['keywords'])
-    top_kw = list(set(all_kw))[:8]
+    top_kw = list(set(all_kw))[:6]
     
     return f"📰 <b>TỔNG QUAN THỊ TRƯỜNG</b>\n━━━━━━━━━━━━━━━━━━\n🚨 Căng thẳng {level}\n📊 Tiêu cực: {neg} | Tích cực: {pos}\n💡 {advice}\n\n📋 Số tin: {len(news_list)}\n🔑 Từ khóa: {', '.join(top_kw)}\n\n{now_str()}"
 
@@ -237,27 +269,26 @@ def check_events():
                 v = fred_get(ev['fred'])
                 if v and len(v) >= 2:
                     curr, prev = v[0]['v'], v[1]['v']
-                    
                     if curr > prev:
-                        if 'fomc' in ev['id'] and 'minutes' not in ev['id']: action = "<b>TĂNG lãi suất 🦅</b>"; detail = f"Fed đã <b>TĂNG</b> lãi suất thêm {round(curr-prev,2)}%"
-                        elif 'gdp' in ev['id']: action = "<b>📈 TĂNG TRƯỞNG ✅</b>"; detail = f"<b>+{round((curr-prev)/prev*100,2)}%</b>"
-                        elif 'nfp' in ev['id']: action = "<b>📈 TĂNG</b>"; detail = "Thị trường lao động <b>yếu đi</b>"
-                        elif 'cpi' in ev['id']: action = "<b>📈 LẠM PHÁT TĂNG</b>"; detail = f"tăng <b>{round((curr-prev)/prev*100,1)}%</b>"
-                        elif 'ppi' in ev['id']: action = "<b>📈 TĂNG</b>"; detail = f"tăng <b>{round((curr-prev)/prev*100,1)}%</b>"
-                        else: action = "<b>📈 TĂNG</b>"; detail = f"tăng <b>{round((curr-prev)/prev*100,1)}%</b>"
+                        if 'fomc' in ev['id'] and 'minutes' not in ev['id']: action="<b>TĂNG 🦅</b>"; detail=f"Fed <b>TĂNG</b> lãi suất thêm {round(curr-prev,2)}%"
+                        elif 'gdp' in ev['id']: action="<b>📈 TĂNG TRƯỞNG ✅</b>"; detail=f"<b>+{round((curr-prev)/prev*100,2)}%</b>"
+                        elif 'nfp' in ev['id']: action="<b>📈 TĂNG</b>"; detail="Thị trường lao động <b>yếu đi</b>"
+                        elif 'cpi' in ev['id']: action="<b>📈 LẠM PHÁT TĂNG</b>"; detail=f"tăng <b>{round((curr-prev)/prev*100,1)}%</b>"
+                        elif 'ppi' in ev['id']: action="<b>📈 TĂNG</b>"; detail=f"tăng <b>{round((curr-prev)/prev*100,1)}%</b>"
+                        else: action="<b>📈 TĂNG</b>"; detail=f"tăng <b>{round((curr-prev)/prev*100,1)}%</b>"
                     elif curr < prev:
-                        if 'fomc' in ev['id'] and 'minutes' not in ev['id']: action = "<b>GIẢM lãi suất 🕊️</b>"; detail = f"Fed đã <b>GIẢM</b> lãi suất {round(prev-curr,2)}%"
-                        elif 'gdp' in ev['id']: action = "<b>📉 SUY GIẢM ⚠️</b>"; detail = f"<b>{round((curr-prev)/prev*100,2)}%</b>"
-                        elif 'nfp' in ev['id']: action = "<b>📉 GIẢM</b>"; detail = "Thị trường lao động <b>mạnh lên</b>"
-                        elif 'cpi' in ev['id']: action = "<b>📉 LẠM PHÁT GIẢM</b>"; detail = f"giảm <b>{round((prev-curr)/prev*100,1)}%</b>"
-                        elif 'ppi' in ev['id']: action = "<b>📉 GIẢM</b>"; detail = f"giảm <b>{round((prev-curr)/prev*100,1)}%</b>"
-                        else: action = "<b>📉 GIẢM</b>"; detail = f"giảm <b>{round((prev-curr)/prev*100,1)}%</b>"
+                        if 'fomc' in ev['id'] and 'minutes' not in ev['id']: action="<b>GIẢM 🕊️</b>"; detail=f"Fed <b>GIẢM</b> lãi suất {round(prev-curr,2)}%"
+                        elif 'gdp' in ev['id']: action="<b>📉 SUY GIẢM ⚠️</b>"; detail=f"<b>{round((curr-prev)/prev*100,2)}%</b>"
+                        elif 'nfp' in ev['id']: action="<b>📉 GIẢM</b>"; detail="Thị trường lao động <b>mạnh lên</b>"
+                        elif 'cpi' in ev['id']: action="<b>📉 LẠM PHÁT GIẢM</b>"; detail=f"giảm <b>{round((prev-curr)/prev*100,1)}%</b>"
+                        elif 'ppi' in ev['id']: action="<b>📉 GIẢM</b>"; detail=f"giảm <b>{round((prev-curr)/prev*100,1)}%</b>"
+                        else: action="<b>📉 GIẢM</b>"; detail=f"giảm <b>{round((prev-curr)/prev*100,1)}%</b>"
                     else:
-                        if 'fomc' in ev['id'] and 'minutes' not in ev['id']: action = "<b>GIỮ NGUYÊN ➡️</b>"; detail = f"Fed <b>GIỮ NGUYÊN</b> lãi suất ở mức {curr}%"
-                        elif 'nfp' in ev['id']: action = "<b>➡️ KHÔNG ĐỔI</b>"; detail = "<b>Ổn định</b>"
-                        elif 'cpi' in ev['id']: action = "<b>➡️ KHÔNG ĐỔI</b>"; detail = "<b>không đổi</b>"
-                        elif 'ppi' in ev['id']: action = "<b>➡️ KHÔNG ĐỔI</b>"; detail = "<b>không đổi</b>"
-                        else: action = "<b>➡️ KHÔNG ĐỔI</b>"; detail = "<b>không đổi</b>"
+                        if 'fomc' in ev['id'] and 'minutes' not in ev['id']: action="<b>GIỮ NGUYÊN ➡️</b>"; detail=f"Fed <b>GIỮ NGUYÊN</b> lãi suất ở mức {curr}%"
+                        elif 'nfp' in ev['id']: action="<b>➡️ KHÔNG ĐỔI</b>"; detail="<b>Ổn định</b>"
+                        elif 'cpi' in ev['id']: action="<b>➡️ KHÔNG ĐỔI</b>"; detail="<b>không đổi</b>"
+                        elif 'ppi' in ev['id']: action="<b>➡️ KHÔNG ĐỔI</b>"; detail="<b>không đổi</b>"
+                        else: action="<b>➡️ KHÔNG ĐỔI</b>"; detail="<b>không đổi</b>"
                     
                     log['events'][key] = time.time()
                     msgs.append(f"===================================\n✅ <b>{ev['name']} - KẾT QUẢ THỰC TẾ</b>\n===================================\n⏰ Đã diễn ra: {ev['date']} lúc {ev['time']} (UTC+7)\n\n{ev['fmt'].format(value=curr, prev=prev, action=action, detail=detail)}\n\n━━━━━━━━━━━━━━━━━━\n📊 <b>TÁC ĐỘNG THỊ TRƯỜNG:</b>\n🥇 Vàng: {ev['gold']}\n₿ Crypto: {ev['crypto']}\n💵 USD: {ev['usd']}\n━━━━━━━━━━━━━━━━━━\n\n📊 <b>DỮ LIỆU FRED:</b>\n{econ_summary()}\n\n{now_str()}")
@@ -266,7 +297,7 @@ def check_events():
     return msgs
 
 # === MAIN ===
-print("BOT TIN TUC - 6H CYCLE")
+print("BOT TIN TUC PRO - 6H")
 
 while True:
     try:
@@ -286,7 +317,7 @@ while True:
             label = "đã khởi động" if s.get('started_ever') else "cập nhật 6h"
             
             msg = f"📰 <b>Bot tin tức {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED: {'✅ Online' if fred_ok() else '⏳ Offline'}\n📡 NewsAPI: ✅ Online\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}\n\n"
-            if news: msg += f"📋 Phát hiện <b>{len(news)} tin</b> liên quan thị trường\n"
+            if news: msg += f"📋 Phát hiện <b>{len(news)} tin</b> quan trọng\n"
             msg += f"\n✅ Đang theo dõi sự kiện...\n\n{now_str()}"
             gui(msg)
             
