@@ -15,15 +15,17 @@ from datetime import datetime, timedelta
 # ============================================
 # THAY BANG THONG TIN CUA BAN
 # ============================================
-TOKEN = "THAY_TOKEN_CUA_BAN_VAO_DAY"
-CHAT_ID = "THAY_CHAT_ID_CUA_BAN_VAO_DAY"
+import os
+
+TOKEN = os.getenv("TELEGRAM_TOKEN", "8893995280:AAF9XwWAm9QgPkwmDrhZdY6UQ4zfySooWpk")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "518284897")
+FRED_API_KEY = os.getenv("FRED_API_KEY", "ff3e122af2b2c0a433606476fc6dc5fb")
 
 # ============================================
 # CAU HINH
 # ============================================
 CHU_KY_TIN_TUC = 600   # 10 phut kiem tra tin dia chinh tri
 CHU_KY_LICH = 3600     # 1 gio kiem tra lich kinh te
-FRED_API_KEY = "ff3e122af2b2c0a433606476fc6dc5fb"
 DATA_FILE = "data/tin_tuc_log.json"
 
 # Trang thai API
