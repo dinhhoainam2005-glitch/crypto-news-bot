@@ -1,9 +1,7 @@
 """
-BOT TIN HIEU GIAO DICH + TRACKER + SCALP - PRO VERSION
-- Price Action: Hammer, Engulfing, Shooting Star, Doji
-- Volume Profile: Vung volume cao nhat
-- V16: 3 coin x 3 khung - ADX + S/R + Entry ly tuong
-- Scalp: 3 coin x 15m - RSI + BB + Price Action + Entry ly tuong
+BOT TIN HIEU GIAO DICH + TRACKER + SCALP - FULL
+- V16: 3 coin x 3 khung (1h, 4h, 1d) - ADX + S/R + Entry ly tuong
+- Scalp: 3 coin x 15m - RSI + BB + S/R + Entry ly tuong - 3 muc do
 - Tracker tu dong theo doi + Bao cao 12h
 - Format chuan: so lieu THAT 100%
 """
@@ -24,9 +22,13 @@ CHU_KY = 300
 NGUONG_DIEM_TREND = 6
 NGUONG_DIEM_SIDEWAY = 5
 ADX_SIDEWAY = 20
+SCALP_MAX_DAILY = 15
+SCALP_COOLDOWN = 1800
 
 tin_hieu_cu = {}
 scalp_cu = {}
+scalp_daily_count = 0
+scalp_daily_date = datetime.now().date()
 TRACKER_FILE = "data/trades.json"
 SCALP_FILE = "data/scalp_trades.json"
 _last_report = 0
@@ -44,6 +46,17 @@ def gui(msg):
 def now_str():
     n = datetime.now()
     return f"🕐 {n.strftime('%H:%M')} (Asia) | {(n-timedelta(hours=5)).strftime('%H:%M')} (EU) | {(n-timedelta(hours=11)).strftime('%H:%M')} (US) | {n.strftime('%d/%m/%Y')}"
+
+def trong_gio_trade():
+    hour = datetime.now().hour
+    return 6 <= hour < 22
+
+def reset_scalp_daily():
+    global scalp_daily_count, scalp_daily_date
+    today = datetime.now().date()
+    if today > scalp_daily_date:
+        scalp_daily_count = 0
+        scalp_daily_date = today
 
 # ============================================
 # TRACKER
@@ -140,153 +153,6 @@ def tracker_report():
         gui(msg)
 
 # ============================================
-# PRICE ACTION DETECTION
-# ============================================
-def detect_price_action(df):
-    """Phát hiện các mẫu nến đảo chiều"""
-    o, h, l, c = df['open'].iloc[-1], df['high'].iloc[-1], df['low'].iloc[-1], df['close'].iloc[-1]
-    o1, h1, l1, c1 = df['open'].iloc[-2], df['high'].iloc[-2], df['low'].iloc[-2], df['close'].iloc[-2]
-    o2, h2, l2, c2 = df['open'].iloc[-3], df['high'].iloc[-3], df['low'].iloc[-3], df['close'].iloc[-3]
-    
-    body = abs(c - o)
-    total_range = h - l
-    
-    results = []
-    
-    # Hammer: bóng dưới dài > 2x thân, đóng cửa gần đỉnh
-    lower_wick = min(o, c) - l
-    if body > 0 and lower_wick > body * 2 and total_range > 0:
-        if (c - l) / total_range > 0.7:
-            results.append(("HAMMER 🔨", "BULLISH"))
-    
-    # Bullish Engulfing
-    if c > o and c1 < o1 and o <= c1 and c >= o1:
-        results.append(("BULLISH ENGULFING 🟢", "BULLISH"))
-    
-    # Morning Star: đỏ → doji nhỏ → xanh
-    if c2 < o2 and body > 0 and abs(c1-o1) < body*0.5 and c > o and c > (o2+c2)/2:
-        results.append(("MORNING STAR ⭐", "BULLISH"))
-    
-    # Inverted Hammer
-    upper_wick_bull = h - max(o, c)
-    if c > o and upper_wick_bull > body * 2 and body > 0:
-        results.append(("INVERTED HAMMER 🔨", "BULLISH"))
-    
-    # Shooting Star: bóng trên dài > 2x thân
-    upper_wick = h - max(o, c)
-    if body > 0 and upper_wick > body * 2 and total_range > 0:
-        if (h - c) / total_range > 0.7:
-            results.append(("SHOOTING STAR 🌠", "BEARISH"))
-    
-    # Bearish Engulfing
-    if c < o and c1 > o1 and o >= c1 and c <= o1:
-        results.append(("BEARISH ENGULFING 🔴", "BEARISH"))
-    
-    # Evening Star: xanh → doji nhỏ → đỏ
-    if c2 > o2 and body > 0 and abs(c1-o1) < body*0.5 and c < o and c < (o2+c2)/2:
-        results.append(("EVENING STAR ⭐", "BEARISH"))
-    
-    # Doji: thân nến rất nhỏ
-    if total_range > 0 and body / total_range < 0.1:
-        if l < min(l1, l2):
-            results.append(("DRAGONFLY DOJI 🐉", "BULLISH"))
-        elif h > max(h1, h2):
-            results.append(("GRAVESTONE DOJI 🪦", "BEARISH"))
-    
-    return results
-
-def get_volume_profile(df, atr):
-    """Tìm vùng giá có volume cao nhất"""
-    recent = df.tail(20)
-    zones = {}
-    for i in range(len(recent)):
-        level = round(recent['close'].iloc[i] / atr) * atr if atr > 0 else recent['close'].iloc[i]
-        if level not in zones: zones[level] = 0
-        zones[level] += recent['volume'].iloc[i]
-    return max(zones, key=zones.get) if zones else df['close'].iloc[-1]
-
-# ============================================
-# SCALP 15M - PRICE ACTION + VOLUME PROFILE
-# ============================================
-def scalp_analysis(symbol):
-    try:
-        df = lay_nen(symbol, "15m", 100)
-        if df is None: return None
-        df = tinh_chi_bao(df)
-        
-        gia = df['close'].iloc[-1]
-        rsi = df['RSI'].iloc[-1]
-        bb_low = df['BB_low'].iloc[-1]
-        bb_high = df['BB_high'].iloc[-1]
-        bb_mid = df['BB_mid'].iloc[-1]
-        atr = df['ATR'].iloc[-1]
-        volr = df['Volume_Ratio'].iloc[-1]
-        adx = df['ADX'].iloc[-1]
-        ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
-        ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
-        
-        if pd.isna(rsi) or pd.isna(atr): return None
-        
-        trend = "WEAK_BULLISH" if ema9 > ema21 else "WEAK_BEARISH"
-        pa_signals = detect_price_action(df)
-        vol_zone = get_volume_profile(df, atr)
-        
-        # === LONG ===
-        if rsi < 40 and volr > 0.8:
-            bullish_pa = [p for p in pa_signals if p[1] == "BULLISH"]
-            if not bullish_pa: return None
-            
-            pa_name = bullish_pa[0][0]
-            
-            # Entry: giá đóng cửa nến đảo chiều
-            entry = gia
-            sl = round(df['low'].iloc[-1] - atr * 0.3, 2)
-            tp1 = round(bb_mid, 2)
-            tp2 = round(entry + atr * 2, 2)
-            entry_pct = 0  # Entry tại giá hiện tại vì đã có xác nhận PA
-            
-            if rsi < 25 and volr > 1.2: score, level = 3, "MẠNH"
-            elif rsi < 30 and volr > 1.0: score, level = 2, "VỪA"
-            else: score, level = 1, "YẾU"
-            
-            return {
-                'signal': 'LONG', 'entry': entry, 'entry_pct': entry_pct,
-                'sl': sl, 'tp1': tp1, 'tp2': tp2,
-                'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                'trend': trend, 'score': score, 'level': level,
-                'pa_signal': pa_name, 'vol_zone': vol_zone
-            }
-        
-        # === SHORT ===
-        if rsi > 60 and volr > 0.8:
-            bearish_pa = [p for p in pa_signals if p[1] == "BEARISH"]
-            if not bearish_pa: return None
-            
-            pa_name = bearish_pa[0][0]
-            
-            entry = gia
-            sl = round(df['high'].iloc[-1] + atr * 0.3, 2)
-            tp1 = round(bb_mid, 2)
-            tp2 = round(entry - atr * 2, 2)
-            entry_pct = 0
-            
-            if rsi > 75 and volr > 1.2: score, level = 3, "MẠNH"
-            elif rsi > 70 and volr > 1.0: score, level = 2, "VỪA"
-            else: score, level = 1, "YẾU"
-            
-            return {
-                'signal': 'SHORT', 'entry': entry, 'entry_pct': entry_pct,
-                'sl': sl, 'tp1': tp1, 'tp2': tp2,
-                'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                'trend': trend, 'score': score, 'level': level,
-                'pa_signal': pa_name, 'vol_zone': vol_zone
-            }
-        
-        return None
-    except:
-        return None
-
-# ============================================
 # LAY DU LIEU NEN
 # ============================================
 def lay_nen(symbol, khung, limit=100):
@@ -360,46 +226,153 @@ def tim_support_resistance(df):
     return sorted(gom(supports), reverse=True), sorted(gom(resistances))
 
 # ============================================
-# V16 - PHAN TICH MOT KHUNG + PRICE ACTION
+# VOLUME PROFILE
+# ============================================
+def get_volume_profile(df, atr):
+    recent = df.tail(20)
+    zones = {}
+    for i in range(len(recent)):
+        level = round(recent['close'].iloc[i] / atr) * atr if atr > 0 else recent['close'].iloc[i]
+        if level not in zones: zones[level] = 0
+        zones[level] += recent['volume'].iloc[i]
+    return max(zones, key=zones.get) if zones else df['close'].iloc[-1]
+
+# ============================================
+# SCALP 15M - PRICE ACTION + RSI HOI + VOL XAC NHAN + R:R >= 1:1.5
+# ============================================
+def scalp_analysis(symbol):
+    global scalp_daily_count
+    reset_scalp_daily()
+    
+    if not trong_gio_trade(): return None
+    if scalp_daily_count >= SCALP_MAX_DAILY: return None
+    
+    try:
+        df = lay_nen(symbol, "15m", 100)
+        if df is None: return None
+        df = tinh_chi_bao(df)
+        supports, resistances = tim_support_resistance(df)
+        
+        gia = df['close'].iloc[-1]
+        rsi_now = df['RSI'].iloc[-1]
+        rsi_prev = df['RSI'].iloc[-2]
+        rsi_prev2 = df['RSI'].iloc[-3]
+        volr = df['Volume_Ratio'].iloc[-1]
+        atr = df['ATR'].iloc[-1]
+        adx = df['ADX'].iloc[-1]
+        ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
+        ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
+        bb_mid = df['BB_mid'].iloc[-1]
+        
+        if pd.isna(rsi_now) or pd.isna(atr): return None
+        
+        trend = "🟢 WEAK_BULLISH" if ema9 > ema21 else "🔴 WEAK_BEARISH"
+        is_bullish = ema9 > ema21
+        is_bearish = ema9 < ema21
+        
+        # Price Action
+        o, h, l, c = df['open'].iloc[-1], df['high'].iloc[-1], df['low'].iloc[-1], df['close'].iloc[-1]
+        o1, h1, l1, c1 = df['open'].iloc[-2], df['high'].iloc[-2], df['low'].iloc[-2], df['close'].iloc[-2]
+        body = abs(c - o)
+        total_range = h - l
+        lower_wick = min(o, c) - l
+        upper_wick = h - max(o, c)
+        
+        is_hammer = body > 0 and total_range > 0 and lower_wick > body * 1.5 and (c - l) / total_range > 0.6
+        is_engulfing = c > o and c1 < o1 and o <= c1 and c >= o1
+        is_shooting_star = body > 0 and total_range > 0 and upper_wick > body * 1.5 and (h - c) / total_range > 0.6
+        is_bear_engulfing = c < o and c1 > o1 and o >= c1 and c <= o1
+        
+        rsi_recovering = rsi_now > rsi_prev > rsi_prev2
+        rsi_falling = rsi_now < rsi_prev < rsi_prev2
+        
+        vol_zone = get_volume_profile(df, atr)
+        
+        # === LONG SETUP ===
+        if is_bullish and rsi_now < 50 and rsi_recovering and volr > 1.2:
+            pa_signal = None
+            if is_hammer: pa_signal = "HAMMER 🔨"
+            elif is_engulfing: pa_signal = "BULLISH ENGULFING 🟢"
+            
+            if pa_signal:
+                entry = round(c * 1.001, 2)
+                sl = round(l - atr * 0.2, 2)
+                tp1 = round(bb_mid, 2)
+                tp2 = round(entry + atr * 1.5, 2)
+                
+                risk = abs(entry - sl) / entry * 100
+                reward = abs(tp1 - entry) / entry * 100
+                rr = round(reward / risk, 1) if risk > 0 else 0
+                
+                if rr < 1.5: return None
+                
+                scalp_daily_count += 1
+                return {
+                    'signal': 'LONG', 'entry': entry, 'sl': sl, 'tp1': tp1, 'tp2': tp2,
+                    'rsi': rsi_now, 'adx': adx, 'volr': volr, 'atr': atr,
+                    'trend': trend, 'pa_signal': pa_signal, 'rr': rr,
+                    'vol_zone': vol_zone,
+                    'supports': supports[:2], 'resistances': resistances[:2]
+                }
+        
+        # === SHORT SETUP ===
+        if is_bearish and rsi_now > 50 and rsi_falling and volr > 1.2:
+            pa_signal = None
+            if is_shooting_star: pa_signal = "SHOOTING STAR 🌠"
+            elif is_bear_engulfing: pa_signal = "BEARISH ENGULFING 🔴"
+            
+            if pa_signal:
+                entry = round(c * 0.999, 2)
+                sl = round(h + atr * 0.2, 2)
+                tp1 = round(bb_mid, 2)
+                tp2 = round(entry - atr * 1.5, 2)
+                
+                risk = abs(sl - entry) / entry * 100
+                reward = abs(entry - tp1) / entry * 100
+                rr = round(reward / risk, 1) if risk > 0 else 0
+                
+                if rr < 1.5: return None
+                
+                scalp_daily_count += 1
+                return {
+                    'signal': 'SHORT', 'entry': entry, 'sl': sl, 'tp1': tp1, 'tp2': tp2,
+                    'rsi': rsi_now, 'adx': adx, 'volr': volr, 'atr': atr,
+                    'trend': trend, 'pa_signal': pa_signal, 'rr': rr,
+                    'vol_zone': vol_zone,
+                    'supports': supports[:2], 'resistances': resistances[:2]
+                }
+        
+        return None
+    except:
+        return None
+
+# ============================================
+# V16 - PHAN TICH MOT KHUNG
 # ============================================
 def phan_tich_khung(df, ten_khung):
-    if df is None or len(df) < 50: return 0,0,[],0,"UNKNOWN",[]
+    if df is None or len(df) < 50: return 0,0,[],0,"UNKNOWN"
     rsi=df['RSI'].iloc[-1]; ma20=df['MA20'].iloc[-1]; ma50=df['MA50'].iloc[-1]
     macd=df['MACD'].iloc[-1]; macds=df['MACD_signal'].iloc[-1]
     macdp=df['MACD'].iloc[-2]; macdsp=df['MACD_signal'].iloc[-2]
     volr=df['Volume_Ratio'].iloc[-1]; adx=df['ADX'].iloc[-1]; gia=df['close'].iloc[-1]
-    if pd.isna(rsi) or pd.isna(adx): return 0,0,[],0,"UNKNOWN",[]
+    if pd.isna(rsi) or pd.isna(adx): return 0,0,[],0,"UNKNOWN"
     che_do = "SIDEWAY" if adx < ADX_SIDEWAY else "TREND"
-    pa_signals = detect_price_action(df)
     diemL=diemS=0; ly_do=[]
-    
-    # RSI + Price Action
-    bullish_pa = [p for p in pa_signals if p[1] == "BULLISH"]
-    bearish_pa = [p for p in pa_signals if p[1] == "BEARISH"]
-    
     if rsi<30: diemL+=3; ly_do.append(f"RSI={rsi:.0f} qua ban")
     elif rsi<40: diemL+=1
     elif rsi>70: diemS+=3; ly_do.append(f"RSI={rsi:.0f} qua mua")
     elif rsi>60: diemS+=1
-    
     if ma20>ma50: diemL+=2
     else: diemS+=2
-    
     if macdp<macdsp and macd>macds: diemL+=3; ly_do.append("MACD cat len")
     elif macdp>macdsp and macd<macds: diemS+=3; ly_do.append("MACD cat xuong")
     elif macd>macds: diemL+=1
     else: diemS+=1
-    
     if volr>1.5:
         if df['close'].iloc[-1]>df['close'].iloc[-2]: diemL+=2; ly_do.append(f"Vol x{volr:.1f}")
         else: diemS+=2; ly_do.append(f"Vol x{volr:.1f}")
-    
-    # Price Action bonus
-    if bullish_pa: diemL+=2; ly_do.append(f"PA: {bullish_pa[0][0]}")
-    if bearish_pa: diemS+=2; ly_do.append(f"PA: {bearish_pa[0][0]}")
-    
     ly_do.append(f"ADX={adx:.0f} ({che_do})")
-    return diemL, diemS, ly_do, gia, che_do, pa_signals
+    return diemL, diemS, ly_do, gia, che_do
 
 # ============================================
 # V16 - TIM ENTRY + SL/TP
@@ -461,67 +434,63 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
 # MAIN
 # ============================================
 print("="*60)
-print(f"🤖 BOT PRO - V16 + SCALP + PRICE ACTION")
+print(f"🤖 BOT PRO - V16 + SCALP CHUAN")
 print("="*60)
-gui("🤖 Bot PRO da khoi dong!\nV16: 1h+4h+1d + Price Action\nScalp: 15m + Price Action + Volume Profile\n📊 Tracker + Bao cao 12h")
+gui("🤖 <b>Bot PRO da khoi dong!</b>\n<b>V16:</b> 1h+4h+1d + ADX + S/R\n<b>Scalp:</b> 15m + PA + RSI hoi + R:R>=1:1.5\n⏰ Gio trade: 6h-22h | Max 15 lenh/ngay\n📊 Tracker + Bao cao 12h")
 
 lan=0
 while True:
     try:
         lan+=1
         now=datetime.now().strftime("%H:%M:%S")
-        print(f"\n#{lan} | {now}")
+        print(f"\n#{lan} | {now} | Scalp daily: {scalp_daily_count}/{SCALP_MAX_DAILY}")
         
-        # ===== SCALP =====
+        # ===== SCALP 15M =====
         for COIN in DANH_SACH_COIN:
             sig = scalp_analysis(COIN)
             if sig:
-                key = f"scalp_{COIN}_{sig['signal']}_{sig['score']}"
-                if key not in scalp_cu or (datetime.now() - scalp_cu[key]).seconds > 900:
+                key = f"scalp_{COIN}_{sig['signal']}"
+                if key not in scalp_cu or (datetime.now() - scalp_cu[key]).seconds >= SCALP_COOLDOWN:
                     scalp_cu[key] = datetime.now()
                     
-                    stars = "⭐⭐⭐" if sig['score'] == 3 else ("⭐⭐" if sig['score'] == 2 else "⭐")
+                    stars = "⭐⭐⭐"
                     action = "MUA" if sig['signal'] == "LONG" else "BÁN"
                     order_type = "BUY LIMIT" if sig['signal'] == "LONG" else "SELL LIMIT"
-                    trend_text = "🟢 WEAK_BULLISH" if sig['trend'] == "WEAK_BULLISH" else "🔴 WEAK_BEARISH"
-                    risk_val = abs(sig['entry'] - sig['sl']) / sig['entry'] * 100
-                    reward_val = abs(sig['tp1'] - sig['entry']) / sig['entry'] * 100
-                    rr = round(reward_val / risk_val, 1) if risk_val > 0 else 0
                     
-                    msg = f"⚡ {COIN.replace('USDT','')} - TÍN HIỆU SCALP {'🟢' if sig['signal']=='LONG' else '🔴'} {stars}\n"
-                    msg += f"📈 SCALP ({sig['level']})\n"
+                    msg = f"⚡ <b>{COIN.replace('USDT','')} - TÍN HIỆU SCALP {'🟢' if sig['signal']=='LONG' else '🔴'} {stars}</b>\n"
                     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    msg += f"📌 Coin: {COIN}\n"
-                    msg += f"💰 Giá hiện tại: ${sig['entry']:,.2f}\n"
-                    msg += f"🎯 ĐIỂM ENTRY: ${sig['entry']:,.2f}\n"
-                    msg += f"📊 Price Action: <b>{sig['pa_signal']}</b>\n"
-                    msg += f"📊 Vol Zone: ${sig['vol_zone']:,.2f}\n"
-                    msg += f"{'🟢' if sig['signal']=='LONG' else '🔴'} {action} Tín hiệu: {sig['signal']}\n"
-                    msg += f"📈 Trend: {trend_text} | RSI: {sig['rsi']:.1f} | ADX: {sig['adx']:.1f}\n"
-                    msg += f"📊 Vol: {sig['volr']:.2f}x | ATR: ${sig['atr']:,.2f}\n\n"
-                    msg += f"💡 ĐẶT LỆNH CHỜ:\n"
-                    msg += f"{'🟢' if sig['signal']=='LONG' else '🔴'} {order_type} tại ${sig['entry']:,.2f}\n"
-                    msg += f"🎯 TP1: ${sig['tp1']:,.2f} | TP2: ${sig['tp2']:,.2f}\n"
-                    msg += f"🛑 SL: ${sig['sl']:,.2f}\n"
-                    msg += f"📐 R:R = 1:{rr} | Risk 2% = $200\n\n"
-                    msg += f"⏳ CHỜ GIÁ CHẠM ${sig['entry']:,.2f} ĐỂ VÀO LỆNH!\n"
+                    msg += f"📌 <b>Coin:</b> {COIN}\n"
+                    msg += f"💰 <b>Giá hiện tại:</b> ${sig['entry']:,.2f}\n"
+                    msg += f"🎯 <b>ENTRY:</b> <b>${sig['entry']:,.2f}</b>\n"
+                    msg += f"📊 <b>Price Action:</b> <b>{sig['pa_signal']}</b>\n"
+                    msg += f"📊 <b>Vol Zone:</b> ${sig['vol_zone']:,.2f}\n"
+                    msg += f"📈 <b>Trend:</b> {sig['trend']} | <b>RSI:</b> {sig['rsi']:.1f} (đang hồi) | <b>ADX:</b> {sig['adx']:.1f}\n"
+                    msg += f"📊 <b>Vol:</b> {sig['volr']:.2f}x | <b>ATR:</b> ${sig['atr']:,.2f}\n"
+                    msg += f"🛡️ <b>SR:</b> "
+                    if sig.get('resistances'): msg += f"R1=${sig['resistances'][0]:,.2f}"
+                    if len(sig.get('resistances', [])) > 1: msg += f", R2=${sig['resistances'][1]:,.2f}"
+                    if sig.get('supports'): msg += f" | S1=${sig['supports'][0]:,.2f}"
+                    if len(sig.get('supports', [])) > 1: msg += f", S2=${sig['supports'][1]:,.2f}"
+                    msg += f"\n\n💡 <b>ĐẶT LỆNH CHỜ:</b>\n"
+                    msg += f"{'🟢' if sig['signal']=='LONG' else '🔴'} <b>{order_type}</b> tại <b>${sig['entry']:,.2f}</b>\n"
+                    msg += f"🎯 <b>TP1:</b> ${sig['tp1']:,.2f} | <b>TP2:</b> ${sig['tp2']:,.2f}\n"
+                    msg += f"🛑 <b>SL:</b> ${sig['sl']:,.2f}\n"
+                    msg += f"📐 <b>R:R = 1:{sig['rr']}</b>\n\n"
+                    msg += f"⏳ <b>CHỜ GIÁ CHẠM ${sig['entry']:,.2f} ĐỂ VÀO LỆNH!</b>\n"
                     msg += now_str()
                     gui(msg)
                     tracker_them(COIN, sig['signal'], sig['entry'], sig['sl'], sig['tp1'], sig['tp2'], "Scalp")
-                    print(f"   ⚡ Scalp {COIN}: {sig['signal']} {sig['level']} | PA: {sig['pa_signal']}")
+                    print(f"   ⚡ Scalp {COIN}: {sig['signal']} | PA: {sig['pa_signal']} | R:R=1:{sig['rr']} | Daily: {scalp_daily_count}/{SCALP_MAX_DAILY}")
         
         # ===== V16 =====
         for COIN in DANH_SACH_COIN:
-            ket_qua={}; df_1h=None; supports_1h=[]; resistances_1h=[]; pa_1h=[]
+            ket_qua={}; df_1h=None; supports_1h=[]; resistances_1h=[]
             for khung in CAC_KHUNG:
                 df=lay_nen(COIN,khung)
                 if df is not None:
                     df=tinh_chi_bao(df)
-                    if khung=="1h": 
-                        df_1h=df
-                        supports_1h,resistances_1h=tim_support_resistance(df)
-                    diemL,diemS,ly_do,gia,che_do,pa=phan_tich_khung(df,khung)
-                    if khung=="1h": pa_1h=pa
+                    if khung=="1h": df_1h=df; supports_1h,resistances_1h=tim_support_resistance(df)
+                    diemL,diemS,ly_do,gia,che_do=phan_tich_khung(df,khung)
                     ket_qua[khung]={"L":diemL,"S":diemS,"che_do":che_do}
             if not ket_qua: continue
             
@@ -556,32 +525,28 @@ while True:
                 volr_val = df_1h['Volume_Ratio'].iloc[-1]
                 atr_val = df_1h['ATR'].iloc[-1]
                 
-                pa_text = ""
-                if pa_1h:
-                    pa_text = f"\n📊 Price Action: <b>{pa_1h[0][0]}</b>"
-                
-                msg = f"🔮 {ten_coin} 🏦 1D TÍN HIỆU CHỜ {signal} {'🟢' if signal=='LONG' else '🔴'} {stars}\n"
+                msg = f"🔮 <b>{ten_coin} 🏦 1D TÍN HIỆU CHỜ {signal} {'🟢' if signal=='LONG' else '🔴'} {stars}</b>\n"
                 msg += f"({'Rất mạnh' if 'CUC' in do_manh else 'Mạnh'})\n"
                 msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                msg += f"📌 Coin: {COIN}\n"
-                msg += f"💰 Giá hiện tại: ${gia_hien_tai:,.2f}\n"
-                msg += f"🎯 ĐIỂM ENTRY LÝ TƯỞNG: ${entry:,.2f}\n"
+                msg += f"📌 <b>Coin:</b> {COIN}\n"
+                msg += f"💰 <b>Giá hiện tại:</b> ${gia_hien_tai:,.2f}\n"
+                msg += f"🎯 <b>ENTRY LÝ TƯỞNG:</b> <b>${entry:,.2f}</b>\n"
                 msg += f"   ({entry_direction} {entry_name})\n"
-                msg += f"   Cách hiện tại: {entry_pct}%{pa_text}\n"
-                msg += f"{'🟢' if signal=='LONG' else '🔴'} {action} Tín hiệu: {signal} {'🟢' if signal=='LONG' else '🔴'}\n"
-                msg += f"📈 Trend: {trend_text} | RSI: {rsi_val:.1f} | ADX: {adx_val:.1f}\n"
-                msg += f"📊 Vol: {volr_val:.1f}x | ATR: ${atr_val:,.2f}\n"
-                msg += f"🛡️ SR: "
+                msg += f"   Cách hiện tại: {entry_pct}%\n"
+                msg += f"{'🟢' if signal=='LONG' else '🔴'} {action} <b>Tín hiệu:</b> {signal}\n"
+                msg += f"📈 <b>Trend:</b> {trend_text} | <b>RSI:</b> {rsi_val:.1f} | <b>ADX:</b> {adx_val:.1f}\n"
+                msg += f"📊 <b>Vol:</b> {volr_val:.1f}x | <b>ATR:</b> ${atr_val:,.2f}\n"
+                msg += f"🛡️ <b>SR:</b> "
                 if resistances_1h: msg += f"R1=${resistances_1h[0]:,.2f}"
                 if len(resistances_1h) > 1: msg += f", R2=${resistances_1h[1]:,.2f}"
                 if supports_1h: msg += f" | S1=${supports_1h[0]:,.2f}"
                 if len(supports_1h) > 1: msg += f", S2=${supports_1h[1]:,.2f}"
-                msg += f"\n\n\n💡 ĐẶT LỆNH CHỜ:\n"
-                msg += f"{'🟢' if signal=='LONG' else '🔴'} {order_type} tại ${entry:,.2f}\n"
-                msg += f"🎯 TP1: ${tp1:,.2f} | TP2: ${tp2:,.2f} | TP3: ${tp3:,.2f}\n"
-                msg += f"🛑 SL: ${sl:,.2f}\n"
-                msg += f"📐 R:R = 1:{rr} | Risk 2% = $200\n\n"
-                msg += f"⏳ CHỜ GIÁ CHẠM ${entry:,.2f} ĐỂ VÀO LỆNH!\n"
+                msg += f"\n\n\n💡 <b>ĐẶT LỆNH CHỜ:</b>\n"
+                msg += f"{'🟢' if signal=='LONG' else '🔴'} <b>{order_type}</b> tại <b>${entry:,.2f}</b>\n"
+                msg += f"🎯 <b>TP1:</b> ${tp1:,.2f} | <b>TP2:</b> ${tp2:,.2f} | <b>TP3:</b> ${tp3:,.2f}\n"
+                msg += f"🛑 <b>SL:</b> ${sl:,.2f}\n"
+                msg += f"📐 <b>R:R = 1:{rr}</b> | Risk 2% = $200\n\n"
+                msg += f"⏳ <b>CHỜ GIÁ CHẠM ${entry:,.2f} ĐỂ VÀO LỆNH!</b>\n"
                 msg += now_str()
                 
                 gui(msg)
