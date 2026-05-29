@@ -206,7 +206,7 @@ def detect_price_action(df):
     return results
 
 def get_volume_profile(df, atr):
-    """Tìm vùng giá có volume cao nhất"""
+    """Tìm vùng giá có volume cao nhất (POC)"""
     recent = df.tail(20)
     zones = {}
     for i in range(len(recent)):
@@ -231,6 +231,96 @@ def get_1h_trend(symbol):
         return None, None
 
 # ============================================
+# TINH ENTRY THONG MINH - KHONG DUNG GIA HIEN TAI
+# ============================================
+def tinh_entry_thong_minh(df, signal_type):
+    """
+    Tinh entry dua tren phan tich ky thuat thuc te:
+    - Cau truc nen (pin bar low/high)
+    - MA20 (vung gia hoan lai trung binh)
+    - Volume Profile POC (vung volume cao nhat)
+    - 50% than nen truoc (vung gia an toan)
+    """
+    gia = df['close'].iloc[-1]
+    atr = df['ATR'].iloc[-1]
+    if pd.isna(atr): atr = gia * 0.002
+    
+    # Lay cac gia tri ky thuat
+    ma20 = df['MA20'].iloc[-1]
+    vol_poc = get_volume_profile(df, atr)
+    
+    # Phan tich nen truoc
+    o1, h1, l1, c1 = df['open'].iloc[-2], df['high'].iloc[-2], df['low'].iloc[-2], df['close'].iloc[-2]
+    o2, h2, l2, c2 = df['open'].iloc[-3], df['high'].iloc[-3], df['low'].iloc[-3], df['close'].iloc[-3]
+    
+    if signal_type == "LONG":
+        # LONG: Tim entry duoi gia hien tai (mua thap)
+        entry_options = []
+        
+        # 1. Day nen truoc (vung gia an toan sau khi dao chieu)
+        day_truoc = min(l1, l2)
+        entry_options.append(("Đáy nến trước", round(day_truoc, 2)))
+        
+        # 2. 50% than nen hien tai (vung gia trung binh cua nen dao chieu)
+        mid_body = (gia + o1) / 2 if signal_type == "LONG" else (gia + df['open'].iloc[-1]) / 2
+        entry_options.append(("50% thân nến", round(mid_body, 2)))
+        
+        # 3. MA20 (hoi ve duong trung binh)
+        if ma20 < gia:
+            entry_options.append(("MA20", round(ma20, 2)))
+        
+        # 4. Volume POC (vung volume cao nhat - noi thanh khoan tot)
+        if vol_poc < gia:
+            entry_options.append(("Vol POC", round(vol_poc, 2)))
+        
+        # 5. -0.5 ATR tu gia hien tai (entry an toan)
+        entry_atr = gia - atr * 0.5
+        entry_options.append(("-0.5 ATR", round(entry_atr, 2)))
+        
+        # Loc cac option duoi gia hien tai va lay option CAO NHAT (gan gia nhat)
+        valid_entries = [(name, price) for name, price in entry_options if price < gia * 0.998]
+        
+        if valid_entries:
+            entry_name, entry = max(valid_entries, key=lambda x: x[1])
+        else:
+            # Neu khong co option nao duoi gia, lay -0.3% gia hien tai
+            entry_name, entry = "Giá -0.3%", round(gia * 0.997, 2)
+    
+    else:  # SHORT
+        # SHORT: Tim entry tren gia hien tai (ban cao)
+        entry_options = []
+        
+        # 1. Dinh nen truoc
+        dinh_truoc = max(h1, h2)
+        entry_options.append(("Đỉnh nến trước", round(dinh_truoc, 2)))
+        
+        # 2. 50% than nen hien tai
+        mid_body = (gia + df['open'].iloc[-1]) / 2
+        entry_options.append(("50% thân nến", round(mid_body, 2)))
+        
+        # 3. MA20
+        if ma20 > gia:
+            entry_options.append(("MA20", round(ma20, 2)))
+        
+        # 4. Volume POC
+        if vol_poc > gia:
+            entry_options.append(("Vol POC", round(vol_poc, 2)))
+        
+        # 5. +0.5 ATR tu gia hien tai
+        entry_atr = gia + atr * 0.5
+        entry_options.append(("+0.5 ATR", round(entry_atr, 2)))
+        
+        # Loc cac option tren gia hien tai va lay option THAP NHAT (gan gia nhat)
+        valid_entries = [(name, price) for name, price in entry_options if price > gia * 1.002]
+        
+        if valid_entries:
+            entry_name, entry = min(valid_entries, key=lambda x: x[1])
+        else:
+            entry_name, entry = "Giá +0.3%", round(gia * 1.003, 2)
+    
+    return entry, entry_name
+
+# ============================================
 # SCALP 15M - PRICE ACTION + VOLUME PROFILE
 # ============================================
 def scalp_analysis(symbol):
@@ -252,7 +342,7 @@ def scalp_analysis(symbol):
         
         if pd.isna(rsi) or pd.isna(atr): return None
         
-        trend = "WEAK_BULLISH" if ema9 > ema21 else "WEAK_BEARISH"
+        trend_15m = "WEAK_BULLISH" if ema9 > ema21 else "WEAK_BEARISH"
         pa_signals = detect_price_action(df)
         vol_zone = get_volume_profile(df, atr)
         
@@ -272,6 +362,12 @@ def scalp_analysis(symbol):
                 allow_long = False  # Khong LONG khi 1h dang DOWNTREND
                 allow_short = True
         
+        # === FILTER XU HUONG 15M - Khong trade nguoc trend 15m ===
+        if trend_15m == "WEAK_BEARISH":
+            allow_long = False  # Khong LONG khi 15m dang BEARISH
+        if trend_15m == "WEAK_BULLISH":
+            allow_short = False  # Khong SHORT khi 15m dang BULLISH
+        
         # === LONG ===
         long_signal = None
         if allow_long and volr > 0.8:
@@ -280,20 +376,27 @@ def scalp_analysis(symbol):
                 bullish_pa = [p for p in pa_signals if p[1] == "BULLISH"]
                 if bullish_pa:
                     pa_name = bullish_pa[0][0]
-                    entry = gia
+                    
+                    # === ENTRY THONG MINH ===
+                    entry, entry_name = tinh_entry_thong_minh(df, "LONG")
+                    
                     sl = round(df['low'].iloc[-1] - atr * 0.3, 2)
                     tp1 = round(bb_mid, 2)
-                    tp2 = round(entry + atr * 2, 2)
+                    # Fix: TP2 phai > TP1
+                    tp2 = round(max(entry + atr * 2, tp1 + atr * 0.5), 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
                     
                     if rsi < 25 and volr > 1.2: score, level = 3, "MẠNH"
                     elif rsi < 30 and volr > 1.0: score, level = 2, "VỪA"
                     else: score, level = 1, "YẾU"
                     
                     long_signal = {
-                        'signal': 'LONG', 'entry': entry, 'entry_pct': 0,
+                        'signal': 'LONG', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
                         'sl': sl, 'tp1': tp1, 'tp2': tp2,
                         'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend, 'score': score, 'level': level,
+                        'trend': trend_15m, 'score': score, 'level': level,
                         'pa_signal': pa_name, 'vol_zone': vol_zone,
                         'filter_type': 'RSI', 'trend_1h': trend_1h
                     }
@@ -303,17 +406,23 @@ def scalp_analysis(symbol):
                 strong_bullish = [p for p in pa_signals if p[1] == "BULLISH" and ("HAMMER" in p[0] or "ENGULFING" in p[0] or "MORNING" in p[0])]
                 if strong_bullish and 35 <= rsi <= 65:
                     pa_name = strong_bullish[0][0]
-                    entry = gia
+                    
+                    # === ENTRY THONG MINH ===
+                    entry, entry_name = tinh_entry_thong_minh(df, "LONG")
+                    
                     sl = round(df['low'].iloc[-1] - atr * 0.3, 2)
                     tp1 = round(bb_mid, 2)
-                    tp2 = round(entry + atr * 2, 2)
+                    tp2 = round(max(entry + atr * 2, tp1 + atr * 0.5), 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
                     
                     score, level = 2, "PA MẠNH"
                     long_signal = {
-                        'signal': 'LONG', 'entry': entry, 'entry_pct': 0,
+                        'signal': 'LONG', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
                         'sl': sl, 'tp1': tp1, 'tp2': tp2,
                         'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend, 'score': score, 'level': level,
+                        'trend': trend_15m, 'score': score, 'level': level,
                         'pa_signal': pa_name, 'vol_zone': vol_zone,
                         'filter_type': 'PA_STRONG', 'trend_1h': trend_1h
                     }
@@ -328,20 +437,27 @@ def scalp_analysis(symbol):
                 bearish_pa = [p for p in pa_signals if p[1] == "BEARISH"]
                 if bearish_pa:
                     pa_name = bearish_pa[0][0]
-                    entry = gia
+                    
+                    # === ENTRY THONG MINH ===
+                    entry, entry_name = tinh_entry_thong_minh(df, "SHORT")
+                    
                     sl = round(df['high'].iloc[-1] + atr * 0.3, 2)
                     tp1 = round(bb_mid, 2)
-                    tp2 = round(entry - atr * 2, 2)
+                    # Fix: TP2 phai < TP1
+                    tp2 = round(min(entry - atr * 2, tp1 - atr * 0.5), 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
                     
                     if rsi > 75 and volr > 1.2: score, level = 3, "MẠNH"
                     elif rsi > 70 and volr > 1.0: score, level = 2, "VỪA"
                     else: score, level = 1, "YẾU"
                     
                     short_signal = {
-                        'signal': 'SHORT', 'entry': entry, 'entry_pct': 0,
+                        'signal': 'SHORT', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
                         'sl': sl, 'tp1': tp1, 'tp2': tp2,
                         'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend, 'score': score, 'level': level,
+                        'trend': trend_15m, 'score': score, 'level': level,
                         'pa_signal': pa_name, 'vol_zone': vol_zone,
                         'filter_type': 'RSI', 'trend_1h': trend_1h
                     }
@@ -351,17 +467,23 @@ def scalp_analysis(symbol):
                 strong_bearish = [p for p in pa_signals if p[1] == "BEARISH" and ("SHOOTING" in p[0] or "ENGULFING" in p[0] or "EVENING" in p[0] or "GRAVESTONE" in p[0])]
                 if strong_bearish and 35 <= rsi <= 65:
                     pa_name = strong_bearish[0][0]
-                    entry = gia
+                    
+                    # === ENTRY THONG MINH ===
+                    entry, entry_name = tinh_entry_thong_minh(df, "SHORT")
+                    
                     sl = round(df['high'].iloc[-1] + atr * 0.3, 2)
                     tp1 = round(bb_mid, 2)
-                    tp2 = round(entry - atr * 2, 2)
+                    tp2 = round(min(entry - atr * 2, tp1 - atr * 0.5), 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
                     
                     score, level = 2, "PA MẠNH"
                     short_signal = {
-                        'signal': 'SHORT', 'entry': entry, 'entry_pct': 0,
+                        'signal': 'SHORT', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
                         'sl': sl, 'tp1': tp1, 'tp2': tp2,
                         'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend, 'score': score, 'level': level,
+                        'trend': trend_15m, 'score': score, 'level': level,
                         'pa_signal': pa_name, 'vol_zone': vol_zone,
                         'filter_type': 'PA_STRONG', 'trend_1h': trend_1h
                     }
@@ -549,7 +671,7 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
 print("="*60)
 print(f"🤖 BOT PRO - V16 + SCALP + PRICE ACTION")
 print("="*60)
-gui("🤖 Bot PRO da khoi dong!\nV16: 1h+4h+1d + Price Action\nScalp: 15m + Price Action + Volume Profile\n📊 Tracker + Bao cao 12h")
+gui("🤖 Bot PRO da khoi dong!\nV16: 1h+4h+1d + Price Action\nScalp: 15m + Entry thong minh + Filter trend\n📊 Tracker + Bao cao 12h")
 
 lan=0
 while True:
@@ -573,7 +695,7 @@ while True:
                     stars = "⭐⭐⭐" if sig['score'] == 3 else ("⭐⭐" if sig['score'] == 2 else "⭐")
                     action = "MUA" if sig['signal'] == "LONG" else "BÁN"
                     order_type = "BUY LIMIT" if sig['signal'] == "LONG" else "SELL LIMIT"
-                    trend_text = "🟢 WEAK_BULLISH" if sig['trend'] == "WEAK_BULLISH" else "🔴 WEAK_BEARISH"
+                    trend_15m_text = "🟢 WEAK_BULLISH" if sig['trend'] == "WEAK_BULLISH" else "🔴 WEAK_BEARISH"
                     trend_1h_text = "🟢 UPTREND" if sig.get('trend_1h') == "UPTREND" else ("🔴 DOWNTREND" if sig.get('trend_1h') == "DOWNTREND" else "⚪ KHONG XAC DINH")
                     risk_val = abs(sig['entry'] - sig['sl']) / sig['entry'] * 100
                     reward_val = abs(sig['tp1'] - sig['entry']) / sig['entry'] * 100
@@ -588,12 +710,14 @@ while True:
                     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     msg += f"📌 <b>Coin:</b> {COIN}\n"
                     msg += f"💰 <b>Giá hiện tại:</b> ${sig['entry']:,.2f}\n"
-                    msg += f"🎯 <b>ENTRY:</b> <b>${sig['entry']:,.2f}</b>\n"
+                    msg += f"🎯 <b>ENTRY:</b> <b>${sig['entry']:,.2f}</b> ({sig['entry_name']})\n"
+                    msg += f"   Cách giá hiện tại: <b>{sig['entry_pct']}%</b>\n"
                     msg += f"📊 <b>Price Action:</b> <b>{sig['pa_signal']}</b>\n"
                     msg += f"📊 <b>Vol Zone:</b> ${sig['vol_zone']:,.2f}{filter_info}\n"
                     msg += f"{'🟢' if sig['signal']=='LONG' else '🔴'} {action} <b>Tín hiệu:</b> {sig['signal']}\n"
-                    msg += f"📈 <b>Trend 15m:</b> {trend_text} | <b>Trend 1h:</b> {trend_1h_text}\n"
-                    msg += f"📊 <b>RSI:</b> {sig['rsi']:.1f} | <b>ADX:</b> {sig['adx']:.1f} | <b>Vol:</b> {sig['volr']:.2f}x | <b>ATR:</b> ${sig['atr']:,.2f}\n\n"
+                    msg += f"📈 <b>Trend 15m:</b> {trend_15m_text}\n"
+                    msg += f"📈 <b>Trend 1h:</b> {trend_1h_text} | <b>RSI:</b> {sig['rsi']:.1f} | <b>ADX:</b> {sig['adx']:.1f}\n"
+                    msg += f"📊 <b>Vol:</b> {sig['volr']:.2f}x | <b>ATR:</b> ${sig['atr']:,.2f}\n\n"
                     msg += f"💡 <b>ĐẶT LỆNH CHỜ:</b>\n"
                     msg += f"{'🟢' if sig['signal']=='LONG' else '🔴'} <b>{order_type}</b> tại <b>${sig['entry']:,.2f}</b>\n"
                     msg += f"🎯 <b>TP1:</b> ${sig['tp1']:,.2f} | <b>TP2:</b> ${sig['tp2']:,.2f}\n"
