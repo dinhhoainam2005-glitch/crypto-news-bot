@@ -1,16 +1,13 @@
-# bot_realtime.py - 431 dòng
-# CHỈ SỬA 2 PHẦN: EVENTS (dòng 200-220) và check_events() (dòng 250-310)
-# TẤT CẢ CÁC PHẦN KHÁC GIỮ NGUYÊN 100%
-
 """
 BOT REALTIME V2 - FULL SIGNALS + CMC - FINAL
 - Thanh lý >$100M | ETF >$300M | Biến động >3%
-- Sự kiện FOMC/CPI/NFP/GDP format chuẩn + Chiến lược + Hành động
+- Sự kiện FOMC/CPI/NFP/GDP format chuẩn + Chiến lược
 - Địa chính trị khẩn cấp
 - Dominance + Fear & Greed (CoinMarketCap)
 - Top Gainers >20% (Vol>$1M, MCap>$10M)
 - Volume Alert >200% (Vol>$10M, MCap>$50M)
 - FedWatch rõ ràng
+- Không spam sự kiện khi khởi động
 """
 import requests
 import time
@@ -273,7 +270,7 @@ def get_fedwatch_prediction():
     return {'current_rate':f"{current_rate}%",'trend':trend,'prediction':prediction}
 
 # ============================================
-# EVENTS - FORMAT CHUẨN (MỚI)
+# EVENTS - FORMAT CHUẨN
 # ============================================
 EVENTS = [
     {'id':'fomc_minutes_jun','name':'📋 Biên bản họp FOMC (T6)','date':'2026-06-04','time':'01:00','impact':'🟢 THẤP','desc':'Biên bản cuộc họp cũ - không có quyết định mới. Ít ảnh hưởng thị trường.','fred':'DFF','is_fomc':False},
@@ -339,34 +336,20 @@ def check_events():
                     curr, prev = v[0]['v'], v[1]['v']
                     
                     if 'fomc' in ev['id'] and 'minutes' not in ev['id']:
-                        if curr > prev:
-                            ket_qua = f"📈 <b>Fed TĂNG lãi suất</b> từ {prev}% lên {curr}%"
-                            tac_dong = "🦅 <b>HAWKISH</b>"
-                            hanh_dong = "🔴 SHORT Crypto"
-                        elif curr < prev:
-                            ket_qua = f"📉 <b>Fed GIẢM lãi suất</b> từ {prev}% xuống {curr}%"
-                            tac_dong = "🕊️ <b>DOVISH</b>"
-                            hanh_dong = "🟢 LONG Crypto"
-                        else:
-                            ket_qua = f"➡️ <b>Fed GIỮ NGUYÊN</b> ở mức {curr}%"
-                            tac_dong = "➡️ <b>TRUNG LẬP</b>"
-                            hanh_dong = "🟢 Tích cực nhẹ"
+                        if curr > prev: ket_qua = f"📈 <b>Fed TĂNG lãi suất</b> từ {prev}% lên {curr}%"; tac_dong = "🦅 <b>HAWKISH</b>"; hanh_dong = "🔴 SHORT Crypto"
+                        elif curr < prev: ket_qua = f"📉 <b>Fed GIẢM lãi suất</b> từ {prev}% xuống {curr}%"; tac_dong = "🕊️ <b>DOVISH</b>"; hanh_dong = "🟢 LONG Crypto"
+                        else: ket_qua = f"➡️ <b>Fed GIỮ NGUYÊN</b> ở mức {curr}%"; tac_dong = "➡️ <b>TRUNG LẬP</b>"; hanh_dong = "🟢 Tích cực nhẹ"
                     
                     elif ev['id'] == 'nfp_may':
-                        ket_qua = f"📊 <b>Thất nghiệp: {curr}%</b>"
-                        tac_dong = "✅ Mạnh" if curr < prev else "⚠️ Yếu"
+                        ket_qua = f"📊 <b>Thất nghiệp: {curr}%</b>"; tac_dong = "✅ Mạnh" if curr < prev else "⚠️ Yếu"
                         hanh_dong = "🟢 LONG" if curr < prev else "🔴 SHORT"
                     
                     elif ev['id'] == 'cpi_may':
                         pct = round((curr-prev)/prev*100,1)
-                        ket_qua = f"📊 <b>CPI: {curr}</b> ({'+' if pct>0 else ''}{pct}%)"
-                        tac_dong = "⚠️ Nóng" if curr > prev else "✅ Hạ nhiệt"
+                        ket_qua = f"📊 <b>CPI: {curr}</b> ({'+' if pct>0 else ''}{pct}%)"; tac_dong = "⚠️ Nóng" if curr > prev else "✅ Hạ nhiệt"
                         hanh_dong = "🟢 LONG" if curr <= prev else "🔴 SHORT"
                     
-                    else:
-                        ket_qua = f"📊 <b>{curr}</b>"
-                        tac_dong = "Đã cập nhật"
-                        hanh_dong = "Theo dõi thêm"
+                    else: ket_qua = f"📊 <b>{curr}</b>"; tac_dong = "Đã cập nhật"; hanh_dong = "Theo dõi thêm"
                     
                     log['events_sent'][key] = time.time()
                     msgs.append(
@@ -412,13 +395,15 @@ print("BOT REALTIME V2 + CMC - FINAL")
 print("="*60)
 
 dom_text = dominance_text()
-gui(f"🚨 <b>BOT REALTIME V2 ĐÃ KHỞI ĐỘNG!</b>\n━━━━━━━━━━━━━━━━━━\n"
+gui(f"🚨 <b>BOT REALTIME V2 ĐÃ KHỞI ĐỘNG!</b>\n"
+    f"━━━━━━━━━━━━━━━━━━\n"
     f"💰 Thanh lý >$100M | 📊 ETF >$300M | 📈 Biến động >3%\n"
-    f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn\n"
-    f"🚀 Top Gainers >20% | 📊 Volume >200%{dom_text}\n"
+    f"🚀 Top Gainers >20% | 📊 Volume >200%\n"
+    f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn{dom_text}\n"
     f"━━━━━━━━━━━━━━━━━━\n{now_str()}")
 
 last_liq = last_etf = last_price = last_events = last_geo = last_dom = last_movers = last_vol = 0
+first_run = True
 
 while True:
     try:
@@ -451,8 +436,11 @@ while True:
         
         if now - last_events >= 3600:
             last_events = now
-            for msg in check_events():
-                gui(f"{msg}\n\n{now_str()}")
+            if first_run:
+                first_run = False
+            else:
+                for msg in check_events():
+                    gui(f"{msg}\n\n{now_str()}")
         
         if now - last_geo >= 600:
             last_geo = now

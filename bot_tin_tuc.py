@@ -547,7 +547,7 @@ def market_summary(news_list):
     return f"📰 <b>TỔNG QUAN THỊ TRƯỜNG</b>\n━━━━━━━━━━━━━━━━━━\n🚨 Mức độ: <b>{level}</b>\n📊 Tiêu cực: {neg}/{total} | Tích cực: {pos}/{total}\n💡 {advice}\n\n🔑 Từ khóa: {', '.join(top_kw)}\n\n{now_str()}"
 
 # ============================================
-# EVENTS - FORMAT CHUẨN MỚI
+# EVENTS - FORMAT CHUẨN
 # ============================================
 EVENTS = [
     {'id':'fomc_minutes_jun','name':'📋 Biên bản họp FOMC (T6)','date':'2026-06-04','time':'01:00','impact':'🟢 THẤP','desc':'Biên bản cuộc họp cũ - không có quyết định mới. Ít ảnh hưởng thị trường.','fred':'DFF','is_fomc':False},
@@ -676,8 +676,6 @@ def check_events():
 print("="*60)
 print("BOT TIN TUC PRO - FINAL")
 print("="*60)
-
-gui(f"📰 <b>Bot Tin Tức đã khởi động!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED + NewsAPI + RSS\n📊 Theo dõi sự kiện kinh tế & địa chính trị\n⏰ Cập nhật mỗi 6h\n{dominance_text()}\n\n{now_str()}")
 
 while True:
     try:
