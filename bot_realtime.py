@@ -1,13 +1,10 @@
 """
 BOT REALTIME V2 - TICH HOP TAT CA TIN HIEU
-- Thanh lý >$100M (Coinglass)
-- ETF Flow >$300M (Farside)
-- Biến động giá >3% (CoinGecko)
+- Thanh lý >$100M (Coinglass) | ETF Flow >$300M (Farside) | Biến động >3% (CoinGecko)
 - Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
 - Địa chính trị khẩn cấp (NewsAPI)
-- BTC.D, ETH.D, SOL.D Dominance
-- FedWatch logic rõ ràng - không mâu thuẫn
-- Cảnh báo trước 5 ngày + kết quả sau sự kiện
+- BTC.D, ETH.D, SOL.D Dominance (không stablecoin) + 24h change + cập nhật mỗi giờ
+- FedWatch logic rõ ràng
 """
 import requests
 import time
@@ -43,9 +40,6 @@ def get_log():
 def save_log(l):
     with open(LOG_FILE, 'w') as f: json.dump(l, f, ensure_ascii=False, indent=2)
 
-# ============================================
-# FRED API
-# ============================================
 def fred_get(sid):
     try:
         r = requests.get(f"https://api.stlouisfed.org/fred/series/observations?series_id={sid}&api_key={FRED_API_KEY}&file_type=json&limit=3&sort_order=desc", timeout=10)
@@ -63,42 +57,82 @@ def econ_summary():
     return " | ".join(parts) if parts else "Đang tải..."
 
 # ============================================
-# DOMINANCE
+# DOMINANCE - FIX
 # ============================================
 def get_dominance():
     try:
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            btc_d = round(data['data']['market_cap_percentage']['btc'], 1)
-            eth_d = round(data['data']['market_cap_percentage']['eth'], 1)
-            sol_d = None
-            r2 = requests.get("https://api.coingecko.com/api/v3/coins/markets",
-                            params={'vs_currency':'usd','ids':'solana','order':'market_cap_desc','per_page':1,'page':1}, timeout=10)
-            if r2.status_code == 200:
-                sol_data = r2.json()
-                if sol_data:
-                    total_mcap = data['data']['total_market_cap']['usd']
-                    sol_d = round(sol_data[0]['market_cap'] / total_mcap * 100, 1)
-            return btc_d, eth_d, sol_d
-    except: pass
-    return None, None, None
+        if r.status_code != 200: return None, None, None, None, None, None
+        data = r.json()
+        total_mcap = data['data']['total_market_cap']['usd']
+        
+        r_stable = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={'ids': 'tether,usd-coin,dai,binance-usd', 'vs_currencies': 'usd', 'include_market_cap': 'true'},
+            timeout=10
+        )
+        stable_mcap = 0
+        if r_stable.status_code == 200:
+            stable_data = r_stable.json()
+            for coin_id in ['tether', 'usd-coin', 'dai', 'binance-usd']:
+                stable_mcap += stable_data.get(coin_id, {}).get('usd_market_cap', 0)
+        
+        real_mcap = total_mcap - stable_mcap
+        
+        r_coins = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={'vs_currency':'usd','ids':'bitcoin,ethereum,solana','order':'market_cap_desc','per_page':3,'page':1,'sparkline':'false'},
+            timeout=10
+        )
+        if r_coins.status_code != 200: return None, None, None, None, None, None
+        
+        coins_data = r_coins.json()
+        btc_mcap = eth_mcap = sol_mcap = 0
+        btc_change = eth_change = sol_change = 0
+        
+        for coin in coins_data:
+            if coin['id'] == 'bitcoin':
+                btc_mcap = coin['market_cap']; btc_change = coin.get('market_cap_change_percentage_24h', 0)
+            elif coin['id'] == 'ethereum':
+                eth_mcap = coin['market_cap']; eth_change = coin.get('market_cap_change_percentage_24h', 0)
+            elif coin['id'] == 'solana':
+                sol_mcap = coin['market_cap']; sol_change = coin.get('market_cap_change_percentage_24h', 0)
+        
+        btc_d = round(btc_mcap / real_mcap * 100, 1) if real_mcap > 0 else 0
+        eth_d = round(eth_mcap / real_mcap * 100, 1) if real_mcap > 0 else 0
+        sol_d = round(sol_mcap / real_mcap * 100, 1) if real_mcap > 0 else 0
+        
+        return btc_d, eth_d, sol_d, round(btc_change, 1), round(eth_change, 1), round(sol_change, 1)
+    except:
+        return None, None, None, None, None, None
 
 def dominance_text():
-    btc_d, eth_d, sol_d = get_dominance()
-    if btc_d:
-        text = f"\n📊 <b>Dominance:</b> BTC: {btc_d}%"
-        if eth_d: text += f" | ETH: {eth_d}%"
-        if sol_d: text += f" | SOL: {sol_d}%"
-        if btc_d > 58:
-            text += "\n⚠️ <b>BTC.D CAO</b> → Altcoin yếu, ưu tiên BTC"
-        elif btc_d < 48:
-            text += "\n✅ <b>BTC.D THẤP</b> → Altcoin season, ưu tiên ETH/SOL"
-        return text
-    return ""
+    btc_d, eth_d, sol_d, btc_ch, eth_ch, sol_ch = get_dominance()
+    if not btc_d: return ""
+    
+    def ch_icon(v):
+        if v > 0: return f"🟢 +{v}%"
+        elif v < 0: return f"🔴 {v}%"
+        return "➡️ 0%"
+    
+    text = f"\n📊 <b>Dominance (không stablecoin):</b>\n"
+    text += f"₿ BTC: <b>{btc_d}%</b> ({ch_icon(btc_ch)})\n"
+    text += f"Ξ ETH: <b>{eth_d}%</b> ({ch_icon(eth_ch)})\n"
+    text += f"◎ SOL: <b>{sol_d}%</b> ({ch_icon(sol_ch)})\n"
+    
+    if btc_d > 58:
+        text += "⚠️ <b>BTC.D CAO</b> → Altcoin yếu, ưu tiên BTC\n"
+    elif btc_d < 48:
+        text += "✅ <b>BTC.D THẤP</b> → Altcoin season, ưu tiên ETH/SOL\n"
+    
+    if abs(btc_ch) > 2:
+        direction = "TĂNG" if btc_ch > 0 else "GIẢM"
+        text += f"⚡ BTC.D đang {direction} mạnh ({btc_ch:+.1f}%) → Dòng tiền đang dịch chuyển!\n"
+    
+    return text
 
 # ============================================
-# 1. THANH LY (COINGLASS)
+# 1-3. THANH LY + ETF + PRICE (giữ nguyên)
 # ============================================
 def check_liquidation():
     try:
@@ -114,9 +148,6 @@ def check_liquidation():
     except: pass
     return None
 
-# ============================================
-# 2. ETF FLOW (FARSIDE)
-# ============================================
 def check_etf_flow():
     try:
         r = requests.get("https://farside.co.uk/btc-flow/", timeout=10,
@@ -136,9 +167,6 @@ def check_etf_flow():
     except: pass
     return None
 
-# ============================================
-# 3. BIEN DONG GIA (COINGECKO)
-# ============================================
 def check_price_change():
     try:
         r = requests.get("https://api.coingecko.com/api/v3/simple/price",
@@ -159,12 +187,11 @@ def check_price_change():
     return None
 
 # ============================================
-# 4. FEDWATCH
+# 4-5. FEDWATCH + EVENTS + GEO (giữ nguyên)
 # ============================================
 def get_fedwatch_prediction():
     fed_data = fred_get('DFF')
     if not fed_data: return None
-    
     current_rate = fed_data[0]['v']
     
     if len(fed_data) >= 2:
@@ -190,22 +217,14 @@ def get_fedwatch_prediction():
     else:
         prediction = "➡️ Chưa có dữ liệu CPI → Dự kiến <b>GIỮ NGUYÊN</b>"
     
-    return {
-        'current_rate': f"{current_rate}%",
-        'trend': trend,
-        'prediction': prediction,
-        'source': 'FRED (dữ liệu thực tế)'
-    }
+    return {'current_rate': f"{current_rate}%", 'trend': trend, 'prediction': prediction, 'source': 'FRED'}
 
-# ============================================
-# 5. SU KIEN KINH TE
-# ============================================
 EVENTS = [
-    {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm phi nông nghiệp Mỹ.','fred':'UNRATE','type':'nfp'},
-    {'id':'cpi_may','name':'📊 CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Chỉ số giá tiêu dùng - lạm phát.','fred':'CPIAUCSL','type':'cpi'},
+    {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm.','fred':'UNRATE','type':'nfp'},
+    {'id':'cpi_may','name':'📊 CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Chỉ số giá tiêu dùng.','fred':'CPIAUCSL','type':'cpi'},
     {'id':'ppi_may','name':'🏭 PPI (T5)','date':'2026-06-12','time':'19:30','impact':'🟡 TB','desc':'Chỉ số giá sản xuất.','fred':'PPIACO','type':'ppi'},
     {'id':'fomc_jun','name':'🏦 FOMC (T6)','date':'2026-06-18','time':'01:00','impact':'🔴 CAO','desc':'Quyết định lãi suất Fed.','fred':'DFF','type':'fomc'},
-    {'id':'gdp_q2','name':'📊 GDP Q2/2026','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng kinh tế Mỹ.','fred':'GDP','type':'gdp'},
+    {'id':'gdp_q2','name':'📊 GDP Q2/2026','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng kinh tế.','fred':'GDP','type':'gdp'},
     {'id':'fomc_jul','name':'🏦 FOMC (T7)','date':'2026-07-30','time':'01:00','impact':'🔴 CAO','desc':'Quyết định lãi suất Fed.','fred':'DFF','type':'fomc'},
 ]
 
@@ -226,7 +245,6 @@ def check_events():
             key = f"pre_{ev['id']}"
             if time.time() - log['events_sent'].get(key, 0) >= 3600:
                 log['events_sent'][key] = time.time()
-                
                 cd = f"⚠️ <b>HÔM NAY</b> {ev['time']}" if days==0 else \
                      f"📅 <b>NGÀY MAI</b> {ev['time']}" if days==1 else \
                      f"📅 Còn <b>{days} ngày</b> - {ev['date']}"
@@ -235,24 +253,13 @@ def check_events():
                 v = fred_get(ev['fred'])
                 if v:
                     curr = v[0]['v']
-                    if ev['type'] == 'fomc':
-                        if fedwatch:
-                            prediction = f"\n📊 <b>PHÂN TÍCH LÃI SUẤT:</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
-                        else:
-                            prediction = f"\n📊 <b>LÃI SUẤT:</b> {curr}%"
-                    elif ev['type'] == 'cpi':
-                        if len(v) >= 2:
-                            ch = round((v[0]['v']-v[1]['v'])/v[1]['v']*100, 1)
-                            prediction = f"\n📊 <b>CPI HIỆN TẠI:</b> {curr} ({'+' if ch>0 else ''}{ch}%)"
-                    elif ev['type'] == 'nfp':
-                        prediction = f"\n📊 <b>THẤT NGHIỆP:</b> {curr}%"
-                    elif ev['type'] == 'gdp':
-                        prediction = f"\n📊 <b>GDP:</b> ${curr:,.0f}B"
+                    if ev['type'] == 'fomc' and fedwatch:
+                        prediction = f"\n📊 <b>PHÂN TÍCH:</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
+                    elif ev['type'] == 'cpi' and len(v) >= 2:
+                        ch = round((v[0]['v']-v[1]['v'])/v[1]['v']*100, 1)
+                        prediction = f"\n📊 <b>CPI:</b> {curr} ({'+' if ch>0 else ''}{ch}%)"
                 
-                dom_text = dominance_text()
-                msgs.append(f"🚨 <b>TÍN HIỆU SỰ KIỆN!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                          f"{ev['name']} | {ev['impact']}\n⏰ {cd}\n📝 {ev['desc']}"
-                          f"{prediction}{dom_text}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
+                msgs.append(f"🚨 <b>TÍN HIỆU SỰ KIỆN!</b>\n━━━━━━━━━━━━━━━━━━\n{ev['name']} | {ev['impact']}\n⏰ {cd}\n📝 {ev['desc']}{prediction}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
         
         elif days < 0 and 1 <= hours_since <= 24:
             key = f"post_{ev['id']}"
@@ -260,34 +267,24 @@ def check_events():
                 v = fred_get(ev['fred'])
                 if v and len(v) >= 2:
                     curr, prev = v[0]['v'], v[1]['v']
-                    
                     if ev['type'] == 'fomc':
-                        if curr > prev: kq = f"📈 <b>TĂNG</b> từ {prev}% lên {curr}%"
-                        elif curr < prev: kq = f"📉 <b>GIẢM</b> từ {prev}% xuống {curr}%"
-                        else: kq = f"➡️ <b>GIỮ NGUYÊN</b> ở {curr}%"
+                        kq = f"📈 <b>TĂNG</b> từ {prev}% lên {curr}%" if curr > prev else \
+                             f"📉 <b>GIẢM</b> từ {prev}% xuống {curr}%" if curr < prev else \
+                             f"➡️ <b>GIỮ NGUYÊN</b> ở {curr}%"
                     elif ev['type'] == 'nfp':
-                        if curr > prev: kq = f"📈 <b>TĂNG</b> lên {curr}%"
-                        elif curr < prev: kq = f"📉 <b>GIẢM</b> xuống {curr}%"
-                        else: kq = f"➡️ <b>KHÔNG ĐỔI</b> ở {curr}%"
+                        kq = f"📈 <b>{curr}%</b>" if curr > prev else f"📉 <b>{curr}%</b>" if curr < prev else f"➡️ <b>{curr}%</b>"
                     elif ev['type'] == 'cpi':
                         pct = round(abs(curr-prev)/prev*100, 1)
-                        if curr > prev: kq = f"📈 <b>TĂNG {pct}%</b> (lạm phát nóng)"
-                        elif curr < prev: kq = f"📉 <b>GIẢM {pct}%</b> (lạm phát hạ nhiệt)"
-                        else: kq = f"➡️ <b>KHÔNG ĐỔI</b>"
+                        kq = f"📈 <b>TĂNG {pct}%</b>" if curr > prev else f"📉 <b>GIẢM {pct}%</b>" if curr < prev else "➡️ <b>KHÔNG ĐỔI</b>"
                     else:
                         kq = f"<b>{curr}</b> (trước: {prev})"
                     
                     log['events_sent'][key] = time.time()
-                    dom_text = dominance_text()
-                    msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                              f"⏰ Đã diễn ra: {ev['date']} {ev['time']}\n📊 {kq}{dom_text}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
+                    msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ!</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {ev['date']} {ev['time']}\n📊 {kq}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
     
     save_log(log)
     return msgs
 
-# ============================================
-# 6. DIA CHINH TRI KHAN CAP
-# ============================================
 GEO_QUERIES = ["iran israel war", "russia ukraine attack", "north korea missile", "china taiwan war"]
 
 def check_geo_emergency():
@@ -299,19 +296,12 @@ def check_geo_emergency():
                 'pageSize': 1, 'apiKey': NEWS_API_KEY
             }, timeout=10)
             if r.status_code != 200: continue
-            
             for a in r.json().get('articles', []):
-                title = a.get('title', '')
-                url = a.get('url', '')
+                title = a.get('title', ''); url = a.get('url', '')
                 if url in log['news_sent']: continue
-                
-                emergency_kw = ['strike', 'attack', 'war', 'missile', 'invasion', 'nuclear', 'bomb']
-                if any(re.search(r'\b' + kw + r'\b', title.lower()) for kw in emergency_kw):
-                    log['news_sent'].append(url)
-                    log['news_sent'] = log['news_sent'][-100:]
-                    save_log(log)
-                    dom_text = dominance_text()
-                    return f"🌍 <b>ĐỊA CHÍNH TRỊ KHẨN!</b>\n━━━━━━━━━━━━━━━━━━\n🇬🇧 {title}\n📡 {(a.get('source',{}) or {}).get('name','Unknown')}\n⚠️ Xung đột leo thang → 🔴 SHORT{dom_text}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}"
+                if any(re.search(r'\b' + kw + r'\b', title.lower()) for kw in ['strike','attack','war','missile','invasion','nuclear','bomb']):
+                    log['news_sent'].append(url); log['news_sent'] = log['news_sent'][-100:]; save_log(log)
+                    return f"🌍 <b>ĐỊA CHÍNH TRỊ KHẨN!</b>\n━━━━━━━━━━━━━━━━━━\n🇬🇧 {title}\n📡 {(a.get('source',{}) or {}).get('name','Unknown')}\n⚠️ Xung đột leo thang → 🔴 SHORT\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}"
             time.sleep(0.3)
         except: continue
     return None
@@ -329,7 +319,7 @@ gui(f"🚨 <b>BOT REALTIME V2 ĐÃ KHỞI ĐỘNG!</b>\n━━━━━━━━
     f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn\n"
     f"⏰ Cảnh báo trước 5 ngày + Kết quả sau sự kiện{dom_text}\n━━━━━━━━━━━━━━━━━━\n{now_str()}")
 
-last_liq = last_etf = last_price = last_events = last_geo = 0
+last_liq = last_etf = last_price = last_events = last_geo = last_dom = 0
 
 while True:
     try:
@@ -359,6 +349,12 @@ while True:
             last_geo = now
             msg = check_geo_emergency()
             if msg: gui(f"{msg}\n\n{now_str()}")
+        
+        # CAP NHAT DOMINANCE MOI GIO
+        if now - last_dom >= 3600:
+            last_dom = now
+            dom = dominance_text()
+            if dom: gui(f"📊 <b>CẬP NHẬT DOMINANCE</b>\n━━━━━━━━━━━━━━━━━━{dom}\n\n{now_str()}")
         
         time.sleep(10)
         

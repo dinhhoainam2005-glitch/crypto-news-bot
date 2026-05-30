@@ -5,7 +5,7 @@ BOT TIN TUC - NEWSAPI + RSS FEEDS - PRO FINAL
 - Dịch tiếng Việt chuẩn Google Translate + sửa từ khóa tài chính
 - Context analysis: hiểu ngữ cảnh, không chỉ đếm từ khóa
 - FedWatch từ FRED - logic rõ ràng, không mâu thuẫn
-- BTC.D, ETH.D, SOL.D Dominance
+- BTC.D, ETH.D, SOL.D Dominance (không stablecoin) + 24h change
 - Lọc tin không liên quan thị trường
 - Post-event tự động báo cáo kết quả
 - Sự kiện trước 5 ngày + báo cáo sau 1-24h
@@ -126,39 +126,79 @@ def format_date(date_str):
     return date_str[:16] if len(date_str) > 16 else date_str
 
 # ============================================
-# DOMINANCE
+# DOMINANCE - FIX CONG THUC + 24H CHANGE
 # ============================================
 def get_dominance():
     try:
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            btc_d = round(data['data']['market_cap_percentage']['btc'], 1)
-            eth_d = round(data['data']['market_cap_percentage']['eth'], 1)
-            sol_d = None
-            r2 = requests.get("https://api.coingecko.com/api/v3/coins/markets",
-                            params={'vs_currency':'usd','ids':'solana','order':'market_cap_desc','per_page':1,'page':1}, timeout=10)
-            if r2.status_code == 200:
-                sol_data = r2.json()
-                if sol_data:
-                    total_mcap = data['data']['total_market_cap']['usd']
-                    sol_d = round(sol_data[0]['market_cap'] / total_mcap * 100, 1)
-            return btc_d, eth_d, sol_d
-    except: pass
-    return None, None, None
+        if r.status_code != 200: return None, None, None, None, None, None
+        data = r.json()
+        total_mcap = data['data']['total_market_cap']['usd']
+        
+        r_stable = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={'ids': 'tether,usd-coin,dai,binance-usd', 'vs_currencies': 'usd', 'include_market_cap': 'true'},
+            timeout=10
+        )
+        stable_mcap = 0
+        if r_stable.status_code == 200:
+            stable_data = r_stable.json()
+            for coin_id in ['tether', 'usd-coin', 'dai', 'binance-usd']:
+                stable_mcap += stable_data.get(coin_id, {}).get('usd_market_cap', 0)
+        
+        real_mcap = total_mcap - stable_mcap
+        
+        r_coins = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={'vs_currency':'usd','ids':'bitcoin,ethereum,solana','order':'market_cap_desc','per_page':3,'page':1,'sparkline':'false'},
+            timeout=10
+        )
+        if r_coins.status_code != 200: return None, None, None, None, None, None
+        
+        coins_data = r_coins.json()
+        btc_mcap = eth_mcap = sol_mcap = 0
+        btc_change = eth_change = sol_change = 0
+        
+        for coin in coins_data:
+            if coin['id'] == 'bitcoin':
+                btc_mcap = coin['market_cap']; btc_change = coin.get('market_cap_change_percentage_24h', 0)
+            elif coin['id'] == 'ethereum':
+                eth_mcap = coin['market_cap']; eth_change = coin.get('market_cap_change_percentage_24h', 0)
+            elif coin['id'] == 'solana':
+                sol_mcap = coin['market_cap']; sol_change = coin.get('market_cap_change_percentage_24h', 0)
+        
+        btc_d = round(btc_mcap / real_mcap * 100, 1) if real_mcap > 0 else 0
+        eth_d = round(eth_mcap / real_mcap * 100, 1) if real_mcap > 0 else 0
+        sol_d = round(sol_mcap / real_mcap * 100, 1) if real_mcap > 0 else 0
+        
+        return btc_d, eth_d, sol_d, round(btc_change, 1), round(eth_change, 1), round(sol_change, 1)
+    except:
+        return None, None, None, None, None, None
 
 def dominance_text():
-    btc_d, eth_d, sol_d = get_dominance()
-    if btc_d:
-        text = f"\n📊 <b>Dominance:</b> BTC: {btc_d}%"
-        if eth_d: text += f" | ETH: {eth_d}%"
-        if sol_d: text += f" | SOL: {sol_d}%"
-        if btc_d > 58:
-            text += "\n⚠️ <b>BTC.D CAO</b> → Altcoin yếu, ưu tiên BTC"
-        elif btc_d < 48:
-            text += "\n✅ <b>BTC.D THẤP</b> → Altcoin season, ưu tiên ETH/SOL"
-        return text
-    return ""
+    btc_d, eth_d, sol_d, btc_ch, eth_ch, sol_ch = get_dominance()
+    if not btc_d: return ""
+    
+    def ch_icon(v):
+        if v > 0: return f"🟢 +{v}%"
+        elif v < 0: return f"🔴 {v}%"
+        return "➡️ 0%"
+    
+    text = f"\n📊 <b>Dominance (không stablecoin):</b>\n"
+    text += f"₿ BTC: <b>{btc_d}%</b> ({ch_icon(btc_ch)})\n"
+    text += f"Ξ ETH: <b>{eth_d}%</b> ({ch_icon(eth_ch)})\n"
+    text += f"◎ SOL: <b>{sol_d}%</b> ({ch_icon(sol_ch)})\n"
+    
+    if btc_d > 58:
+        text += "⚠️ <b>BTC.D CAO</b> → Altcoin yếu, ưu tiên BTC\n"
+    elif btc_d < 48:
+        text += "✅ <b>BTC.D THẤP</b> → Altcoin season, ưu tiên ETH/SOL\n"
+    
+    if abs(btc_ch) > 2:
+        direction = "TĂNG" if btc_ch > 0 else "GIẢM"
+        text += f"⚡ BTC.D đang {direction} mạnh ({btc_ch:+.1f}%) → Dòng tiền đang dịch chuyển!\n"
+    
+    return text
 
 # ============================================
 # DICH TIENG VIET
@@ -245,7 +285,7 @@ def get_fedwatch_prediction():
     }
 
 # ============================================
-# LOC TIN
+# LOC TIN + CONTEXT + FETCH (giữ nguyên)
 # ============================================
 def is_market_news(title):
     title_lower = title.lower()
@@ -253,9 +293,6 @@ def is_market_news(title):
         if kw in title_lower: return False
     return True
 
-# ============================================
-# CONTEXT ANALYSIS
-# ============================================
 CONTEXT_POSITIVE = [
     "ceasefire", "truce", "peace deal", "peace talk", "reopening", "withdrawal",
     "rate cut", "dovish", "easing", "stimulus", "rebound", "recover",
@@ -301,16 +338,13 @@ def phan_tich_tin(title, description=""):
     if not is_market_news(title): return None
     
     t = (title + " " + description).lower()
-    
     pos_context = sum(1 for ctx in CONTEXT_POSITIVE if ctx in t)
     neg_context = sum(1 for ctx in CONTEXT_NEGATIVE if ctx in t)
-    
     pos_kw = [kw for kw in POSITIVE_KW if has_keyword(t, kw)]
     neg_kw = [kw for kw in NEGATIVE_KW if has_keyword(t, kw)]
     
     pos_score = pos_context * 3 + len(pos_kw)
     neg_score = neg_context * 3 + len(neg_kw)
-    
     if pos_score == 0 and neg_score == 0: return None
     
     display_kw = []
@@ -318,8 +352,7 @@ def phan_tich_tin(title, description=""):
         if ctx in t and len(display_kw) < 3: display_kw.append(ctx)
     for ctx in CONTEXT_NEGATIVE:
         if ctx in t and len(display_kw) < 3: display_kw.append(ctx)
-    if not display_kw:
-        display_kw = pos_kw[:3] if pos_kw else neg_kw[:3]
+    if not display_kw: display_kw = pos_kw[:3] if pos_kw else neg_kw[:3]
     display_kw = list(set(display_kw))[:3]
     
     if neg_score > pos_score:
@@ -341,9 +374,6 @@ def phan_tich_tin(title, description=""):
     
     return {'loai': loai, 'gold': gold, 'crypto': crypto, 'usd': usd, 'advice': advice, 'keywords': display_kw}
 
-# ============================================
-# QUERIES
-# ============================================
 QUERIES = [
     "iran israel war strike ceasefire",
     "russia ukraine war nato peace talk",
@@ -371,9 +401,6 @@ def clean_html(text):
     text = unescape(text)
     return text.strip()
 
-# ============================================
-# FETCH RSS
-# ============================================
 def fetch_rss_news(log):
     all_news = []
     for url, source_name in RSS_FEEDS:
@@ -383,38 +410,28 @@ def fetch_rss_news(log):
             root = ET.fromstring(r.content)
             items = root.findall('.//item')
             if not items: items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
-            
             for item in items[:5]:
-                title_el = item.find('title')
-                desc_el = item.find('description')
-                link_el = item.find('link')
-                date_el = item.find('pubDate')
-                
+                title_el = item.find('title'); desc_el = item.find('description')
+                link_el = item.find('link'); date_el = item.find('pubDate')
                 if title_el is None: title_el = item.find('{http://www.w3.org/2005/Atom}title')
                 if desc_el is None: desc_el = item.find('{http://www.w3.org/2005/Atom}summary')
                 if link_el is None: link_el = item.find('{http://www.w3.org/2005/Atom}link')
-                if date_el is None:
-                    date_el = item.find('{http://www.w3.org/2005/Atom}updated') or \
-                              item.find('{http://www.w3.org/2005/Atom}published')
+                if date_el is None: date_el = item.find('{http://www.w3.org/2005/Atom}updated') or item.find('{http://www.w3.org/2005/Atom}published')
                 
                 title = title_el.text if title_el is not None else ''
                 description = clean_html(desc_el.text) if desc_el is not None and desc_el.text else ''
-                link = link_el.get('href') if link_el is not None and link_el.get('href') else \
-                       (link_el.text if link_el is not None else '')
+                link = link_el.get('href') if link_el is not None and link_el.get('href') else (link_el.text if link_el is not None else '')
                 pubdate = date_el.text if date_el is not None else ''
                 
                 if not title or link in log['news_sent']: continue
-                
                 result = phan_tich_tin(title, description)
                 if result is None: continue
                 if any(similarity(title, e.get('title_en', '')) > 0.5 for e in all_news): continue
                 
                 log['news_sent'].append(link)
                 all_news.append({
-                    'title_vi': dich_tieng_viet_chuan(title),
-                    'title_en': title,
-                    'description': description,
-                    'source': source_name,
+                    'title_vi': dich_tieng_viet_chuan(title), 'title_en': title,
+                    'description': description, 'source': source_name,
                     'date': format_date(pubdate) if pubdate else '',
                     'loai': result['loai'], 'gold': result['gold'],
                     'crypto': result['crypto'], 'usd': result['usd'],
@@ -423,9 +440,6 @@ def fetch_rss_news(log):
         except: continue
     return all_news
 
-# ============================================
-# FETCH NEWSAPI
-# ============================================
 def fetch_newsapi_news(log):
     all_news = []
     for query in QUERIES:
@@ -435,14 +449,11 @@ def fetch_newsapi_news(log):
                 'pageSize': 2, 'apiKey': NEWS_API_KEY
             }, timeout=10)
             if r.status_code != 200: continue
-            
             for a in r.json().get('articles', []):
                 url_news = a.get('url', '')
                 if url_news in log['news_sent']: continue
-                
                 source_name = (a.get('source', {}) or {}).get('name', 'Unknown')
-                source_domain = source_name.lower().replace(' ', '')
-                if any(b in source_domain for b in BLOCKED_SOURCES): continue
+                if any(b in source_name.lower().replace(' ', '') for b in BLOCKED_SOURCES): continue
                 
                 title = a.get('title', '')
                 description = a.get('description', '') or ''
@@ -454,10 +465,8 @@ def fetch_newsapi_news(log):
                 
                 log['news_sent'].append(url_news)
                 all_news.append({
-                    'title_vi': dich_tieng_viet_chuan(title),
-                    'title_en': title,
-                    'description': description,
-                    'source': source_name,
+                    'title_vi': dich_tieng_viet_chuan(title), 'title_en': title,
+                    'description': description, 'source': source_name,
                     'date': format_date(published) if published else '',
                     'loai': result['loai'], 'gold': result['gold'],
                     'crypto': result['crypto'], 'usd': result['usd'],
@@ -470,7 +479,6 @@ def fetch_newsapi_news(log):
 def fetch_all_news():
     log = get_log()
     log['news_sent'] = []
-    
     rss_news = fetch_rss_news(log)
     api_news = fetch_newsapi_news(log)
     
@@ -481,14 +489,11 @@ def fetch_all_news():
             if similarity(api_item.get('title_en', ''), existing.get('title_en', '')) > 0.5:
                 if any(t in api_item['source'].lower() for t in TRUSTED_SOURCES) and \
                    not any(t in existing['source'].lower() for t in TRUSTED_SOURCES):
-                    all_news.remove(existing)
-                    all_news.append(api_item)
-                dup = True
-                break
+                    all_news.remove(existing); all_news.append(api_item)
+                dup = True; break
         if not dup: all_news.append(api_item)
     
-    log['news_sent'] = log['news_sent'][-500:]
-    save_log(log)
+    log['news_sent'] = log['news_sent'][-500:]; save_log(log)
     
     priority = {'CỰC KỲ TIÊU CỰC':0, 'RẤT TIÊU CỰC':1, 'TIÊU CỰC':2, 'TÍCH CỰC':3, 'CỰC KỲ TÍCH CỰC':4}
     def sk(n):
@@ -501,13 +506,11 @@ def fetch_all_news():
 
 def tom_tat_tieng_viet(description, keywords):
     parts = []
-    if keywords:
-        parts.append(f"🔑 <b>Từ khóa:</b> {', '.join(keywords)}")
+    if keywords: parts.append(f"🔑 <b>Từ khóa:</b> {', '.join(keywords)}")
     if description:
         desc = clean_html(description)
         first = desc.split('.')[0].strip()
-        if len(first) > 15:
-            parts.append(f"📝 {first}.")
+        if len(first) > 15: parts.append(f"📝 {first}.")
     return "\n".join(parts) if parts else ""
 
 def market_summary(news_list):
@@ -530,7 +533,7 @@ def market_summary(news_list):
     return f"📰 <b>TỔNG QUAN THỊ TRƯỜNG</b>\n━━━━━━━━━━━━━━━━━━\n🚨 Mức độ: <b>{level}</b>\n📊 Tiêu cực: {neg}/{total} | Tích cực: {pos}/{total}\n💡 {advice}\n\n🔑 Từ khóa: {', '.join(top_kw)}\n\n{now_str()}"
 
 # ============================================
-# EVENTS
+# EVENTS (giữ nguyên)
 # ============================================
 EVENTS = [
     {'id':'fomc_minutes_jun','name':'📋 Biên bản họp FOMC (T6)','date':'2026-06-04','time':'01:00','impact':'🟡 TRUNG BÌNH','desc':'Biên bản cuộc họp FOMC tháng 6.','fred':'DFF','is_fomc':True},
@@ -613,6 +616,9 @@ print("="*60)
 print("BOT TIN TUC PRO - FINAL")
 print("="*60)
 
+# Gui khoi dong
+gui(f"📰 <b>Bot Tin Tức đã khởi động!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED + NewsAPI + RSS\n📊 Theo dõi sự kiện kinh tế & địa chính trị\n⏰ Cập nhật mỗi 6h\n{dominance_text()}\n\n{now_str()}")
+
 while True:
     try:
         s = get_state()
@@ -639,8 +645,7 @@ while True:
                     
                     msg = f"📰 TIN TỨC {n['loai']}\n━━━━━━━━━━━━━━━━━━\n"
                     msg += f"🇻🇳 <b>{n['title_vi']}</b>\n\n"
-                    if tom_tat:
-                        msg += f"{tom_tat}\n\n"
+                    if tom_tat: msg += f"{tom_tat}\n\n"
                     msg += f"📡 Nguồn: {n['source']}{date_line}\n"
                     msg += f"🇬🇧 {n['title_en']}\n\n"
                     msg += f"🏦 <b>Dự báo:</b>\n{n['gold']}\n{n['crypto']}\n{n['usd']}\n\n"
