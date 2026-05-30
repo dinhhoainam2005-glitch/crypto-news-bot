@@ -5,6 +5,7 @@ BOT TIN TUC - NEWSAPI + RSS FEEDS - PRO FINAL
 - Dịch tiếng Việt chuẩn Google Translate + sửa từ khóa tài chính
 - Context analysis: hiểu ngữ cảnh, không chỉ đếm từ khóa
 - FedWatch từ FRED - logic rõ ràng, không mâu thuẫn
+- BTC.D, ETH.D, SOL.D Dominance
 - Lọc tin không liên quan thị trường
 - Post-event tự động báo cáo kết quả
 - Sự kiện trước 5 ngày + báo cáo sau 1-24h
@@ -125,6 +126,41 @@ def format_date(date_str):
     return date_str[:16] if len(date_str) > 16 else date_str
 
 # ============================================
+# DOMINANCE
+# ============================================
+def get_dominance():
+    try:
+        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            btc_d = round(data['data']['market_cap_percentage']['btc'], 1)
+            eth_d = round(data['data']['market_cap_percentage']['eth'], 1)
+            sol_d = None
+            r2 = requests.get("https://api.coingecko.com/api/v3/coins/markets",
+                            params={'vs_currency':'usd','ids':'solana','order':'market_cap_desc','per_page':1,'page':1}, timeout=10)
+            if r2.status_code == 200:
+                sol_data = r2.json()
+                if sol_data:
+                    total_mcap = data['data']['total_market_cap']['usd']
+                    sol_d = round(sol_data[0]['market_cap'] / total_mcap * 100, 1)
+            return btc_d, eth_d, sol_d
+    except: pass
+    return None, None, None
+
+def dominance_text():
+    btc_d, eth_d, sol_d = get_dominance()
+    if btc_d:
+        text = f"\n📊 <b>Dominance:</b> BTC: {btc_d}%"
+        if eth_d: text += f" | ETH: {eth_d}%"
+        if sol_d: text += f" | SOL: {sol_d}%"
+        if btc_d > 58:
+            text += "\n⚠️ <b>BTC.D CAO</b> → Altcoin yếu, ưu tiên BTC"
+        elif btc_d < 48:
+            text += "\n✅ <b>BTC.D THẤP</b> → Altcoin season, ưu tiên ETH/SOL"
+        return text
+    return ""
+
+# ============================================
 # DICH TIENG VIET
 # ============================================
 FIX_DICH = {
@@ -170,7 +206,7 @@ def dich_tieng_viet_chuan(text):
     return translated
 
 # ============================================
-# FEDWATCH - LOGIC RO RANG
+# FEDWATCH
 # ============================================
 def get_fedwatch_prediction():
     fed_data = fred_get('DFF')
@@ -589,8 +625,9 @@ while True:
             news = fetch_all_news()
             label = "đã khởi động" if s.get('started_ever') else "cập nhật 6h"
             rss_count = sum(1 for n in news if n['source'] in ['Reuters', 'CNBC', 'CoinDesk', 'Cointelegraph', 'MarketWatch'])
+            dom_text = dominance_text()
             
-            gui(f"📰 <b>BẢN TIN THỊ TRƯỜNG {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED: {'✅' if fred_ok() else '⏳'} | RSS: ✅ {rss_count} tin | NewsAPI: ✅\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}\n\n📋 Phát hiện <b>{len(news)} tin</b>\n\n{now_str()}")
+            gui(f"📰 <b>BẢN TIN THỊ TRƯỜNG {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED: {'✅' if fred_ok() else '⏳'} | RSS: ✅ {rss_count} tin | NewsAPI: ✅\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}{dom_text}\n\n📋 Phát hiện <b>{len(news)} tin</b>\n\n{now_str()}")
             
             if news:
                 summary = market_summary(news)

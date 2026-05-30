@@ -5,6 +5,7 @@ BOT REALTIME V2 - TICH HOP TAT CA TIN HIEU
 - Biến động giá >3% (CoinGecko)
 - Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
 - Địa chính trị khẩn cấp (NewsAPI)
+- BTC.D, ETH.D, SOL.D Dominance
 - FedWatch logic rõ ràng - không mâu thuẫn
 - Cảnh báo trước 5 ngày + kết quả sau sự kiện
 """
@@ -60,6 +61,41 @@ def econ_summary():
         v = fred_get(sid)
         if v: parts.append(fmt.format(v[0]['v']))
     return " | ".join(parts) if parts else "Đang tải..."
+
+# ============================================
+# DOMINANCE
+# ============================================
+def get_dominance():
+    try:
+        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            btc_d = round(data['data']['market_cap_percentage']['btc'], 1)
+            eth_d = round(data['data']['market_cap_percentage']['eth'], 1)
+            sol_d = None
+            r2 = requests.get("https://api.coingecko.com/api/v3/coins/markets",
+                            params={'vs_currency':'usd','ids':'solana','order':'market_cap_desc','per_page':1,'page':1}, timeout=10)
+            if r2.status_code == 200:
+                sol_data = r2.json()
+                if sol_data:
+                    total_mcap = data['data']['total_market_cap']['usd']
+                    sol_d = round(sol_data[0]['market_cap'] / total_mcap * 100, 1)
+            return btc_d, eth_d, sol_d
+    except: pass
+    return None, None, None
+
+def dominance_text():
+    btc_d, eth_d, sol_d = get_dominance()
+    if btc_d:
+        text = f"\n📊 <b>Dominance:</b> BTC: {btc_d}%"
+        if eth_d: text += f" | ETH: {eth_d}%"
+        if sol_d: text += f" | SOL: {sol_d}%"
+        if btc_d > 58:
+            text += "\n⚠️ <b>BTC.D CAO</b> → Altcoin yếu, ưu tiên BTC"
+        elif btc_d < 48:
+            text += "\n✅ <b>BTC.D THẤP</b> → Altcoin season, ưu tiên ETH/SOL"
+        return text
+    return ""
 
 # ============================================
 # 1. THANH LY (COINGLASS)
@@ -123,7 +159,7 @@ def check_price_change():
     return None
 
 # ============================================
-# 4. FEDWATCH - LOGIC RO RANG
+# 4. FEDWATCH
 # ============================================
 def get_fedwatch_prediction():
     fed_data = fred_get('DFF')
@@ -186,7 +222,6 @@ def check_events():
         days = (evd - today).days
         hours_since = (now - evdt).total_seconds()/3600 if evdt < now else -1
         
-        # PRE-EVENT
         if 0 <= days <= 5:
             key = f"pre_{ev['id']}"
             if time.time() - log['events_sent'].get(key, 0) >= 3600:
@@ -214,11 +249,11 @@ def check_events():
                     elif ev['type'] == 'gdp':
                         prediction = f"\n📊 <b>GDP:</b> ${curr:,.0f}B"
                 
+                dom_text = dominance_text()
                 msgs.append(f"🚨 <b>TÍN HIỆU SỰ KIỆN!</b>\n━━━━━━━━━━━━━━━━━━\n"
                           f"{ev['name']} | {ev['impact']}\n⏰ {cd}\n📝 {ev['desc']}"
-                          f"{prediction}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
+                          f"{prediction}{dom_text}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
         
-        # POST-EVENT
         elif days < 0 and 1 <= hours_since <= 24:
             key = f"post_{ev['id']}"
             if key not in log['events_sent']:
@@ -243,8 +278,9 @@ def check_events():
                         kq = f"<b>{curr}</b> (trước: {prev})"
                     
                     log['events_sent'][key] = time.time()
+                    dom_text = dominance_text()
                     msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                              f"⏰ Đã diễn ra: {ev['date']} {ev['time']}\n📊 {kq}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
+                              f"⏰ Đã diễn ra: {ev['date']} {ev['time']}\n📊 {kq}{dom_text}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
     
     save_log(log)
     return msgs
@@ -274,7 +310,8 @@ def check_geo_emergency():
                     log['news_sent'].append(url)
                     log['news_sent'] = log['news_sent'][-100:]
                     save_log(log)
-                    return f"🌍 <b>ĐỊA CHÍNH TRỊ KHẨN!</b>\n━━━━━━━━━━━━━━━━━━\n🇬🇧 {title}\n📡 {(a.get('source',{}) or {}).get('name','Unknown')}\n⚠️ Xung đột leo thang → 🔴 SHORT\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}"
+                    dom_text = dominance_text()
+                    return f"🌍 <b>ĐỊA CHÍNH TRỊ KHẨN!</b>\n━━━━━━━━━━━━━━━━━━\n🇬🇧 {title}\n📡 {(a.get('source',{}) or {}).get('name','Unknown')}\n⚠️ Xung đột leo thang → 🔴 SHORT{dom_text}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}"
             time.sleep(0.3)
         except: continue
     return None
@@ -286,10 +323,11 @@ print("="*60)
 print("BOT REALTIME V2 - FULL SIGNALS")
 print("="*60)
 
+dom_text = dominance_text()
 gui(f"🚨 <b>BOT REALTIME V2 ĐÃ KHỞI ĐỘNG!</b>\n━━━━━━━━━━━━━━━━━━\n"
     f"💰 Thanh lý >$100M | 📊 ETF >$300M | 📈 Biến động >3%\n"
     f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn\n"
-    f"⏰ Cảnh báo trước 5 ngày + Kết quả sau sự kiện\n━━━━━━━━━━━━━━━━━━\n{now_str()}")
+    f"⏰ Cảnh báo trước 5 ngày + Kết quả sau sự kiện{dom_text}\n━━━━━━━━━━━━━━━━━━\n{now_str()}")
 
 last_liq = last_etf = last_price = last_events = last_geo = 0
 
