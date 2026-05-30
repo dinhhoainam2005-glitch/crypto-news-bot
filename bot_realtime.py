@@ -1,11 +1,11 @@
 """
-BOT REALTIME V2 - FULL SIGNALS + CMC
-- Thanh lý >$100M (Coinglass) | ETF Flow >$300M (Farside) | Biến động >3% (CoinGecko)
-- Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
-- Địa chính trị khẩn cấp (NewsAPI)
+BOT REALTIME V2 - FULL SIGNALS + CMC - FINAL
+- Thanh lý >$100M | ETF >$300M | Biến động >3%
+- Sự kiện FOMC/CPI/NFP/GDP | Địa chính trị khẩn
 - Dominance + Fear & Greed (CoinMarketCap)
-- Top Gainers/Losers 24h (CMC) | Volume Alert >300% (CMC)
-- FedWatch logic rõ ràng
+- Top Gainers >20% (lọc coin thực: Vol>$1M, MCap>$10M)
+- Volume Alert >200% (lọc coin thực: Vol>$10M, MCap>$50M)
+- FedWatch rõ ràng
 """
 import requests
 import time
@@ -117,32 +117,44 @@ def dominance_text():
     return text
 
 # ============================================
-# TOP GAINERS/LOSERS (CMC)
+# TOP GAINERS - LOC COIN THUC TE
 # ============================================
 def check_top_movers():
     log = get_log()
     try:
         headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
-        # Top gainers
         r = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest",
-                        params={'limit': 20, 'sort': 'percent_change_24h', 'sort_dir': 'desc',
-                               'cryptocurrency_type': 'all', 'tag': 'all'},
+                        params={'limit': 100, 'sort': 'percent_change_24h', 'sort_dir': 'desc'},
                         headers=headers, timeout=10)
         if r.status_code != 200: return None
         
         data = r.json()['data']
         alerts = []
         
-        for coin in data[:10]:
-            change = coin['quote']['USD']['percent_change_24h']
-            if change and abs(change) >= 15:
-                name = coin['name']; symbol = coin['symbol']
+        for coin in data:
+            try:
+                change = coin['quote']['USD']['percent_change_24h']
+                volume = coin['quote']['USD']['volume_24h']
+                market_cap = coin['quote']['USD']['market_cap']
+                name = coin['name']
+                symbol = coin['symbol']
+                
+                if not change or abs(change) < 20: continue
+                if not volume or volume < 1_000_000: continue
+                if not market_cap or market_cap < 10_000_000: continue
+                if symbol in ['USDT','USDC','DAI','BUSD','TUSD','USDP','USDD']: continue
+                
                 direction = "🟢 TĂNG" if change > 0 else "🔴 GIẢM"
                 key = f"gainer_{symbol}"
+                
                 if key not in log['gainers_sent']:
                     log['gainers_sent'].append(key)
                     log['gainers_sent'] = log['gainers_sent'][-50:]
-                    alerts.append(f"📈 {symbol} ({name}): <b>{direction} {abs(change):.1f}%</b>")
+                    alerts.append(
+                        f"📈 <b>{symbol}</b> ({name[:20]}): {direction} <b>{abs(change):.1f}%</b>\n"
+                        f"   💧 Vol: ${volume:,.0f} | 💰 MCap: ${market_cap:,.0f}"
+                    )
+            except: continue
         
         save_log(log)
         if alerts:
@@ -151,36 +163,48 @@ def check_top_movers():
     return None
 
 # ============================================
-# VOLUME ALERT (CMC)
+# VOLUME ALERT - LOC COIN THUC TE
 # ============================================
 def check_volume_alert():
     log = get_log()
     try:
         headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
         r = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest",
-                        params={'limit': 50, 'sort': 'volume_24h', 'sort_dir': 'desc'},
+                        params={'limit': 100, 'sort': 'volume_24h', 'sort_dir': 'desc'},
                         headers=headers, timeout=10)
         if r.status_code != 200: return None
         
         data = r.json()['data']
         alerts = []
         
-        for coin in data[:30]:
-            volume_24h = coin['quote']['USD']['volume_24h']
-            volume_change = coin['quote']['USD'].get('volume_change_24h', 0) or 0
-            
-            if abs(volume_change) >= 300:
-                name = coin['name']; symbol = coin['symbol']
+        for coin in data:
+            try:
+                volume_24h = coin['quote']['USD']['volume_24h']
+                volume_change = coin['quote']['USD'].get('volume_change_24h', 0) or 0
+                market_cap = coin['quote']['USD']['market_cap']
+                name = coin['name']
+                symbol = coin['symbol']
+                
+                if not volume_24h or volume_24h < 10_000_000: continue
+                if not market_cap or market_cap < 50_000_000: continue
+                if abs(volume_change) < 200: continue
+                if symbol in ['USDT','USDC','DAI','BUSD','TUSD']: continue
+                
                 direction = "🟢 TĂNG" if volume_change > 0 else "🔴 GIẢM"
                 key = f"vol_{symbol}"
+                
                 if key not in log['volume_sent']:
                     log['volume_sent'].append(key)
                     log['volume_sent'] = log['volume_sent'][-50:]
-                    alerts.append(f"📊 {symbol}: Volume {direction} <b>{abs(volume_change):.0f}%</b> (${volume_24h:,.0f})")
+                    alerts.append(
+                        f"📊 <b>{symbol}</b> ({name[:20]}): Volume {direction} <b>{abs(volume_change):.0f}%</b>\n"
+                        f"   💧 Vol 24h: ${volume_24h:,.0f} | 💰 MCap: ${market_cap:,.0f}"
+                    )
+            except: continue
         
         save_log(log)
         if alerts:
-            return "📊 <b>VOLUME ĐỘT BIẾN:</b>\n" + "\n".join(alerts[:5])
+            return "📊 <b>VOLUME ĐỘT BIẾN:</b>\n" + "\n".join(alerts[:3])
     except: pass
     return None
 
@@ -206,8 +230,7 @@ def check_etf_flow():
         r = requests.get("https://farside.co.uk/btc-flow/", timeout=10,
                         headers={'User-Agent': 'Mozilla/5.0'})
         if r.status_code != 200: return None
-        html = r.text
-        match = re.search(r'Total.*?\$?([\d,]+\.?\d*)\s*(m|M|b|B)?', html, re.DOTALL)
+        match = re.search(r'Total.*?\$?([\d,]+\.?\d*)\s*(m|M|b|B)?', r.text, re.DOTALL)
         if match:
             value = float(match.group(1).replace(',', ''))
             unit = match.group(2) if match.group(2) else ''
@@ -326,11 +349,16 @@ def check_geo_emergency():
 # MAIN
 # ============================================
 print("="*60)
-print("BOT REALTIME V2 + CMC - FULL SIGNALS")
+print("BOT REALTIME V2 + CMC - FINAL")
 print("="*60)
 
 dom_text = dominance_text()
-gui(f"🚨 <b>BOT REALTIME V2 + CMC ĐÃ KHỞI ĐỘNG!</b>\n━━━━━━━━━━━━━━━━━━\n💰 Thanh lý >$100M | 📊 ETF >$300M | 📈 Biến động >3%\n🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn\n🚀 Top Gainers >15% | 📊 Volume >300%{dom_text}\n━━━━━━━━━━━━━━━━━━\n{now_str()}")
+gui(f"🚨 <b>BOT REALTIME V2 ĐÃ KHỞI ĐỘNG!</b>\n━━━━━━━━━━━━━━━━━━\n"
+    f"💰 Thanh lý >$100M | 📊 ETF >$300M | 📈 Biến động >3%\n"
+    f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn\n"
+    f"🚀 Top Gainers >20% (Vol>$1M, MCap>$10M)\n"
+    f"📊 Volume >200% (Vol>$10M, MCap>$50M){dom_text}\n"
+    f"━━━━━━━━━━━━━━━━━━\n{now_str()}")
 
 last_liq = last_etf = last_price = last_events = last_geo = last_dom = last_movers = last_vol = 0
 
