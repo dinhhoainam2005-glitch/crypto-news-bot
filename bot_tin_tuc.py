@@ -8,7 +8,7 @@ BOT TIN TUC - NEWSAPI + RSS FEEDS - PRO FINAL
 - BTC.D, ETH.D, SOL.D Dominance (CoinMarketCap - khớp TradingView)
 - Fear & Greed từ CoinMarketCap
 - Lọc tin không liên quan thị trường
-- Post-event tự động báo cáo kết quả
+- Post-event tự động báo cáo kết quả + Chiến lược + Hành động
 - Sự kiện trước 5 ngày + báo cáo sau 1-24h
 - 6h cập nhật 1 lần
 """
@@ -140,7 +140,6 @@ def get_dominance():
         eth_d = round(data['eth_dominance'], 1)
         total_mcap = data['quote']['USD']['total_market_cap']
         
-        # Fear & Greed tu CMC (neu co)
         fng_value = data.get('fear_greed_value', None)
         fng_text = data.get('fear_greed_classification', '')
         if fng_value is None:
@@ -175,7 +174,6 @@ def dominance_text():
     elif btc_d < 48: text += "✅ <b>BTC.D THẤP</b> → Altcoin season, ưu tiên ETH/SOL\n"
     if abs(btc_ch) > 2: text += f"⚡ BTC.D đang {'TĂNG' if btc_ch>0 else 'GIẢM'} mạnh ({btc_ch:+.1f}%) → Dòng tiền đang dịch chuyển!\n"
     
-    # Fear & Greed
     if fng_val is not None:
         i = "😱" if fng_val <= 25 else "😟" if fng_val <= 40 else "😐" if fng_val <= 60 else "😊" if fng_val <= 75 else "🤤"
         text += f"\n{i} <b>Fear & Greed:</b> {fng_val}/100 ({fng_text}) [CMC]\n"
@@ -349,7 +347,6 @@ def phan_tich_tin(title, description=""):
         crypto = "₿ Crypto: 🔴 GIẢM (risk-off)"
         usd = "💵 USD: 🟢 TĂNG (trú ẩn)"
         advice = "⚠️ ƯU TIÊN SHORT"
-        keywords = neg_found if 'neg_found' in dir() else neg_kw
     else:
         if pos_score >= 9: loai = "🟢🟢🟢 CỰC KỲ TÍCH CỰC"
         elif pos_score >= 6: loai = "🟢🟢 TÍCH CỰC"
@@ -358,7 +355,6 @@ def phan_tich_tin(title, description=""):
         crypto = "₿ Crypto: 🟢 TĂNG (risk-on)"
         usd = "💵 USD: 🔴 GIẢM (risk-on)"
         advice = "✅ ƯU TIÊN LONG"
-        keywords = display_kw
     
     return {'loai': loai, 'gold': gold, 'crypto': crypto, 'usd': usd, 'advice': advice, 'keywords': display_kw}
 
@@ -551,16 +547,16 @@ def market_summary(news_list):
     return f"📰 <b>TỔNG QUAN THỊ TRƯỜNG</b>\n━━━━━━━━━━━━━━━━━━\n🚨 Mức độ: <b>{level}</b>\n📊 Tiêu cực: {neg}/{total} | Tích cực: {pos}/{total}\n💡 {advice}\n\n🔑 Từ khóa: {', '.join(top_kw)}\n\n{now_str()}"
 
 # ============================================
-# EVENTS
+# EVENTS - FORMAT CHUẨN MỚI
 # ============================================
 EVENTS = [
-    {'id':'fomc_minutes_jun','name':'📋 Biên bản họp FOMC (T6)','date':'2026-06-04','time':'01:00','impact':'🟡 TRUNG BÌNH','desc':'Biên bản cuộc họp FOMC tháng 6.','fred':'DFF','is_fomc':True},
-    {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm phi nông nghiệp Mỹ.','fred':'UNRATE','is_fomc':False},
-    {'id':'cpi_may','name':'📊 Chỉ số CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Chỉ số giá tiêu dùng - thước đo lạm phát.','fred':'CPIAUCSL','is_fomc':False},
-    {'id':'ppi_may','name':'🏭 Chỉ số PPI (T5)','date':'2026-06-12','time':'19:30','impact':'🟡 TRUNG BÌNH','desc':'Chỉ số giá sản xuất.','fred':'PPIACO','is_fomc':False},
-    {'id':'fomc_jun','name':'🏦 Quyết định lãi suất FOMC (T6)','date':'2026-06-18','time':'01:00','impact':'🔴 CAO','desc':'Quyết định lãi suất Fed - SỰ KIỆN QUAN TRỌNG NHẤT.','fred':'DFF','is_fomc':True},
-    {'id':'gdp_q2','name':'📊 GDP Quý 2/2026','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng kinh tế Mỹ quý 2/2026.','fred':'GDP','is_fomc':False},
-    {'id':'fomc_jul','name':'🏦 Quyết định lãi suất FOMC (T7)','date':'2026-07-30','time':'01:00','impact':'🔴 CAO','desc':'Quyết định lãi suất giữa năm 2026.','fred':'DFF','is_fomc':True},
+    {'id':'fomc_minutes_jun','name':'📋 Biên bản họp FOMC (T6)','date':'2026-06-04','time':'01:00','impact':'🟢 THẤP','desc':'Biên bản cuộc họp cũ - không có quyết định mới. Ít ảnh hưởng thị trường.','fred':'DFF','is_fomc':False},
+    {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm phi nông nghiệp - chỉ báo sức khỏe kinh tế Mỹ.','fred':'UNRATE','is_fomc':False,'advice':'NFP > dự đoán → Kinh tế mạnh → 🟢 LONG Crypto\nNFP < dự đoán → Kinh tế yếu → 🔴 SHORT Crypto','gold':'NFP cao → USD mạnh → Vàng GIẢM','crypto':'NFP cao → Kinh tế tốt → Crypto TĂNG','usd':'NFP cao → USD TĂNG'},
+    {'id':'cpi_may','name':'📊 Chỉ số CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Chỉ số giá tiêu dùng - thước đo lạm phát quan trọng nhất.','fred':'CPIAUCSL','is_fomc':False,'advice':'CPI thấp hơn dự đoán → Fed dovish → 🟢 LONG Crypto\nCPI cao hơn dự đoán → Fed hawkish → 🔴 SHORT Crypto','gold':'CPI cao → Vàng TĂNG (hedge lạm phát)','crypto':'CPI cao → lo tăng lãi suất → Crypto GIẢM','usd':'CPI cao → USD TĂNG (kỳ vọng hawkish)'},
+    {'id':'ppi_may','name':'🏭 Chỉ số PPI (T5)','date':'2026-06-12','time':'19:30','impact':'🟡 TRUNG BÌNH','desc':'Chỉ số giá sản xuất - chỉ báo sớm của lạm phát.','fred':'PPIACO','is_fomc':False,'advice':'PPI tăng → áp lực lạm phát → thận trọng\nPPI giảm → tích cực cho Crypto','gold':'PPI cao → Vàng TĂNG nhẹ','crypto':'PPI cao → Crypto GIẢM nhẹ','usd':'PPI cao → USD TĂNG nhẹ'},
+    {'id':'fomc_jun','name':'🏦 Quyết định lãi suất FOMC (T6)','date':'2026-06-18','time':'01:00','impact':'🔴 CAO - SỰ KIỆN QUAN TRỌNG NHẤT THÁNG','desc':'Fed công bố quyết định tăng/giảm/giữ nguyên lãi suất.','fred':'DFF','is_fomc':True,'advice':'Nếu GIỮ NGUYÊN → 🟢 LONG Crypto\nNếu TĂNG → 🔴 SHORT Crypto\nNếu GIẢM → 🟢 LONG mạnh Crypto\nĐóng bot 30p trước sự kiện!','gold':'Hawkish → Vàng GIẢM | Dovish → Vàng TĂNG','crypto':'Hawkish → Crypto GIẢM | Dovish → Crypto TĂNG','usd':'Hawkish → USD TĂNG | Dovish → USD GIẢM'},
+    {'id':'gdp_q2','name':'📊 GDP Quý 2/2026','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng kinh tế Mỹ quý 2/2026.','fred':'GDP','is_fomc':False,'advice':'GDP cao → Kinh tế mạnh → 🟢 LONG Crypto\nGDP thấp → Suy thoái → 🔴 SHORT Crypto','gold':'GDP cao → Vàng GIẢM (risk-on)','crypto':'GDP cao → Crypto TĂNG','usd':'GDP cao → USD TĂNG'},
+    {'id':'fomc_jul','name':'🏦 Quyết định lãi suất FOMC (T7)','date':'2026-07-30','time':'01:00','impact':'🔴 CAO - SỰ KIỆN QUAN TRỌNG','desc':'Quyết định lãi suất Fed giữa năm 2026.','fred':'DFF','is_fomc':True,'advice':'Nếu GIỮ NGUYÊN → 🟢 LONG Crypto\nNếu TĂNG → 🔴 SHORT Crypto\nĐóng bot 30p trước sự kiện!','gold':'Hawkish → Vàng GIẢM | Dovish → Vàng TĂNG','crypto':'Hawkish → Crypto GIẢM | Dovish → Crypto TĂNG','usd':'Hawkish → USD TĂNG | Dovish → USD GIẢM'},
 ]
 
 def check_events():
@@ -586,9 +582,29 @@ def check_events():
                 
                 fw_text = ""
                 if ev.get('is_fomc') and fedwatch:
-                    fw_text = f"\n\n📊 <b>PHÂN TÍCH LÃI SUẤT ({fedwatch['source']}):</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
+                    fw_text = f"\n\n📊 <b>PHÂN TÍCH LÃI SUẤT (FRED):</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
                 
-                msgs.append(f"📅 <b>{ev['name']}</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {cd}\n⚡ Mức độ: {ev['impact']}\n📝 {ev['desc']}{fw_text}\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}\n\n{now_str()}")
+                tac_dong = ""
+                if ev.get('gold') or ev.get('crypto') or ev.get('usd'):
+                    tac_dong = f"\n\n📊 <b>TÁC ĐỘNG DỰ KIẾN:</b>\n"
+                    if ev.get('gold'): tac_dong += f"🥇 Vàng: {ev['gold']}\n"
+                    if ev.get('crypto'): tac_dong += f"₿ Crypto: {ev['crypto']}\n"
+                    if ev.get('usd'): tac_dong += f"💵 USD: {ev['usd']}\n"
+                
+                chien_luoc = ""
+                if ev.get('advice'):
+                    chien_luoc = f"\n💡 <b>CHIẾN LƯỢC:</b>\n{ev['advice']}\n"
+                
+                msgs.append(
+                    f"📅 <b>{ev['name']}</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"⏰ {cd}\n"
+                    f"⚡ Mức độ: {ev['impact']}\n"
+                    f"📝 {ev['desc']}"
+                    f"{fw_text}{tac_dong}{chien_luoc}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 <b>DỮ LIỆU KINH TẾ HIỆN TẠI:</b>\n{econ_summary()}\n\n{now_str()}"
+                )
         
         elif days < 0 and 1 <= hours_since <= 24:
             key = f"post_{ev['id']}"
@@ -598,31 +614,58 @@ def check_events():
                     curr, prev = v[0]['v'], v[1]['v']
                     
                     if 'fomc' in ev['id'] and 'minutes' not in ev['id']:
-                        ket_qua = f"📈 <b>TĂNG</b> từ {prev}% lên {curr}%" if curr > prev else \
-                                  f"📉 <b>GIẢM</b> từ {prev}% xuống {curr}%" if curr < prev else \
-                                  f"➡️ <b>GIỮ NGUYÊN</b> ở mức {curr}%"
-                        tac_dong = "🦅 Hawkish" if curr > prev else "🕊️ Dovish" if curr < prev else "➡️ Trung lập"
-                    elif 'gdp' in ev['id']:
-                        pct = round((curr-prev)/prev*100, 2)
-                        ket_qua = f"📈 <b>TĂNG {pct}%</b>" if curr > prev else f"📉 <b>GIẢM {abs(pct)}%</b>"
-                        tac_dong = "✅ Tích cực" if curr > prev else "⚠️ Tiêu cực"
-                    elif 'nfp' in ev['id']:
-                        ket_qua = f"📈 <b>{curr}%</b>" if curr > prev else f"📉 <b>{curr}%</b>" if curr < prev else f"➡️ <b>{curr}%</b>"
-                        tac_dong = "⚠️ Lao động yếu" if curr > prev else "✅ Lao động mạnh" if curr < prev else "➡️ Ổn định"
-                    elif 'cpi' in ev['id']:
-                        pct = round(abs(curr-prev)/prev*100, 1)
-                        ket_qua = f"📈 <b>TĂNG {pct}%</b>: {curr}" if curr > prev else f"📉 <b>GIẢM {pct}%</b>: {curr}" if curr < prev else f"➡️ <b>{curr}</b>"
-                        tac_dong = "⚠️ Lạm phát nóng" if curr > prev else "✅ Lạm phát hạ nhiệt" if curr < prev else "➡️ Ổn định"
-                    elif 'ppi' in ev['id']:
-                        pct = round(abs(curr-prev)/prev*100, 1)
-                        ket_qua = f"📈 <b>TĂNG {pct}%</b>: {curr}" if curr > prev else f"📉 <b>GIẢM {pct}%</b>: {curr}" if curr < prev else f"➡️ <b>{curr}</b>"
-                        tac_dong = "⚠️ Áp lực giá" if curr > prev else "✅ Giảm áp lực" if curr < prev else "➡️ Ổn định"
+                        if curr > prev:
+                            ket_qua = f"📈 <b>Fed TĂNG lãi suất</b> từ {prev}% lên {curr}%"
+                            tac_dong = "🦅 <b>HAWKISH</b> - Thắt chặt tiền tệ"
+                            hanh_dong = "🔴 Tiêu cực cho Crypto → Cân nhắc SHORT"
+                        elif curr < prev:
+                            ket_qua = f"📉 <b>Fed GIẢM lãi suất</b> từ {prev}% xuống {curr}%"
+                            tac_dong = "🕊️ <b>DOVISH</b> - Nới lỏng tiền tệ"
+                            hanh_dong = "🟢 Tích cực cho Crypto → Cân nhắc LONG"
+                        else:
+                            ket_qua = f"➡️ <b>Fed GIỮ NGUYÊN lãi suất</b> ở mức {curr}%"
+                            tac_dong = "➡️ <b>TRUNG LẬP</b> - Chờ thêm dữ liệu"
+                            hanh_dong = "🟢 Tích cực nhẹ → Tiếp tục theo dõi"
+                    
+                    elif ev['id'] == 'nfp_may':
+                        ket_qua = f"📊 <b>Thất nghiệp: {curr}%</b> (trước: {prev}%)"
+                        tac_dong = "⚠️ Lao động yếu đi" if curr > prev else "✅ Lao động mạnh lên" if curr < prev else "➡️ Không đổi"
+                        hanh_dong = "🟢 LONG Crypto" if curr < prev else "🔴 SHORT Crypto"
+                    
+                    elif ev['id'] == 'cpi_may':
+                        pct = round((curr - prev) / prev * 100, 1)
+                        ket_qua = f"📊 <b>CPI: {curr}</b> ({'+' if pct > 0 else ''}{pct}%)"
+                        tac_dong = "⚠️ Lạm phát nóng" if curr > prev else "✅ Lạm phát hạ nhiệt" if curr < prev else "➡️ Không đổi"
+                        hanh_dong = "🟢 LONG Crypto (CPI thấp)" if curr <= prev else "🔴 SHORT Crypto (CPI cao)"
+                    
+                    elif ev['id'] == 'ppi_may':
+                        pct = round((curr - prev) / prev * 100, 1)
+                        ket_qua = f"📊 <b>PPI: {curr}</b> ({'+' if pct > 0 else ''}{pct}%)"
+                        tac_dong = "⚠️ Áp lực giá tăng" if curr > prev else "✅ Áp lực giá giảm" if curr < prev else "➡️ Không đổi"
+                        hanh_dong = "Theo dõi thêm"
+                    
+                    elif ev['id'] == 'gdp_q2':
+                        pct = round((curr - prev) / prev * 100, 2)
+                        ket_qua = f"📊 <b>GDP: ${curr:,.0f}B</b> ({'+' if pct > 0 else ''}{pct}%)"
+                        tac_dong = "✅ Kinh tế tăng trưởng" if curr > prev else "⚠️ Kinh tế suy giảm"
+                        hanh_dong = "🟢 LONG Crypto" if curr > prev else "🔴 SHORT Crypto"
+                    
                     else:
-                        ket_qua = f"<b>{curr}</b>"
+                        ket_qua = f"📊 <b>{curr}</b> (trước: {prev})"
                         tac_dong = "Đã cập nhật"
+                        hanh_dong = "Theo dõi thêm"
                     
                     log['events'][key] = time.time()
-                    msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {ev['date']} lúc {ev['time']}\n\n📊 <b>KẾT QUẢ:</b>\n{ket_qua}\n🎤 {tac_dong}\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}\n\n{now_str()}")
+                    msgs.append(
+                        f"✅ <b>{ev['name']} - KẾT QUẢ THỰC TẾ</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"⏰ Đã diễn ra: {ev['date']} lúc {ev['time']} (giờ VN)\n\n"
+                        f"📊 <b>KẾT QUẢ:</b>\n{ket_qua}\n\n"
+                        f"🎤 <b>ĐÁNH GIÁ:</b>\n{tac_dong}\n\n"
+                        f"💡 <b>HÀNH ĐỘNG:</b>\n{hanh_dong}\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 <b>DỮ LIỆU KINH TẾ HIỆN TẠI:</b>\n{econ_summary()}\n\n{now_str()}"
+                    )
     
     save_log(log)
     return msgs

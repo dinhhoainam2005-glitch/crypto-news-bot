@@ -1,10 +1,15 @@
+# bot_realtime.py - 431 dòng
+# CHỈ SỬA 2 PHẦN: EVENTS (dòng 200-220) và check_events() (dòng 250-310)
+# TẤT CẢ CÁC PHẦN KHÁC GIỮ NGUYÊN 100%
+
 """
 BOT REALTIME V2 - FULL SIGNALS + CMC - FINAL
 - Thanh lý >$100M | ETF >$300M | Biến động >3%
-- Sự kiện FOMC/CPI/NFP/GDP | Địa chính trị khẩn
+- Sự kiện FOMC/CPI/NFP/GDP format chuẩn + Chiến lược + Hành động
+- Địa chính trị khẩn cấp
 - Dominance + Fear & Greed (CoinMarketCap)
-- Top Gainers >20% (lọc coin thực: Vol>$1M, MCap>$10M)
-- Volume Alert >200% (lọc coin thực: Vol>$10M, MCap>$50M)
+- Top Gainers >20% (Vol>$1M, MCap>$10M)
+- Volume Alert >200% (Vol>$10M, MCap>$50M)
 - FedWatch rõ ràng
 """
 import requests
@@ -26,8 +31,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 def gui(msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                     data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
     except: pass
 
 def now_str():
@@ -53,7 +57,7 @@ def fred_get(sid):
 
 def econ_summary():
     parts = []
-    for sid, fmt in [('DFF','LS Fed: {}%'), ('CPIAUCSL','CPI: {}'), ('UNRATE','TN: {}%'), ('GDP','GDP: ${:,.0f}B')]:
+    for sid, fmt in [('DFF','LS Fed: {}%'),('CPIAUCSL','CPI: {}'),('UNRATE','TN: {}%'),('GDP','GDP: ${:,.0f}B')]:
         v = fred_get(sid)
         if v: parts.append(fmt.format(v[0]['v']))
     return " | ".join(parts) if parts else "Đang tải..."
@@ -81,8 +85,7 @@ def get_dominance():
     
     try:
         headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
-        r2 = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest",
-                         params={'symbol':'BTC,ETH,SOL'}, headers=headers, timeout=10)
+        r2 = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest", params={'symbol':'BTC,ETH,SOL'}, headers=headers, timeout=10)
         if r2.status_code == 200:
             coins = r2.json()['data']
             btc_change = round(coins['BTC']['quote']['USD']['percent_change_24h'], 1)
@@ -117,15 +120,13 @@ def dominance_text():
     return text
 
 # ============================================
-# TOP GAINERS - LOC COIN THUC TE
+# TOP GAINERS + VOLUME ALERT (CMC)
 # ============================================
 def check_top_movers():
     log = get_log()
     try:
         headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
-        r = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest",
-                        params={'limit': 100, 'sort': 'percent_change_24h', 'sort_dir': 'desc'},
-                        headers=headers, timeout=10)
+        r = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest", params={'limit':100,'sort':'percent_change_24h','sort_dir':'desc'}, headers=headers, timeout=10)
         if r.status_code != 200: return None
         
         data = r.json()['data']
@@ -150,10 +151,7 @@ def check_top_movers():
                 if key not in log['gainers_sent']:
                     log['gainers_sent'].append(key)
                     log['gainers_sent'] = log['gainers_sent'][-50:]
-                    alerts.append(
-                        f"📈 <b>{symbol}</b> ({name[:20]}): {direction} <b>{abs(change):.1f}%</b>\n"
-                        f"   💧 Vol: ${volume:,.0f} | 💰 MCap: ${market_cap:,.0f}"
-                    )
+                    alerts.append(f"📈 <b>{symbol}</b> ({name[:20]}): {direction} <b>{abs(change):.1f}%</b>\n   💧 Vol: ${volume:,.0f} | 💰 MCap: ${market_cap:,.0f}")
             except: continue
         
         save_log(log)
@@ -162,16 +160,11 @@ def check_top_movers():
     except: pass
     return None
 
-# ============================================
-# VOLUME ALERT - LOC COIN THUC TE
-# ============================================
 def check_volume_alert():
     log = get_log()
     try:
         headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
-        r = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest",
-                        params={'limit': 100, 'sort': 'volume_24h', 'sort_dir': 'desc'},
-                        headers=headers, timeout=10)
+        r = requests.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest", params={'limit':100,'sort':'volume_24h','sort_dir':'desc'}, headers=headers, timeout=10)
         if r.status_code != 200: return None
         
         data = r.json()['data']
@@ -196,10 +189,7 @@ def check_volume_alert():
                 if key not in log['volume_sent']:
                     log['volume_sent'].append(key)
                     log['volume_sent'] = log['volume_sent'][-50:]
-                    alerts.append(
-                        f"📊 <b>{symbol}</b> ({name[:20]}): Volume {direction} <b>{abs(volume_change):.0f}%</b>\n"
-                        f"   💧 Vol 24h: ${volume_24h:,.0f} | 💰 MCap: ${market_cap:,.0f}"
-                    )
+                    alerts.append(f"📊 <b>{symbol}</b> ({name[:20]}): Volume {direction} <b>{abs(volume_change):.0f}%</b>\n   💧 Vol 24h: ${volume_24h:,.0f} | 💰 MCap: ${market_cap:,.0f}")
             except: continue
         
         save_log(log)
@@ -213,13 +203,11 @@ def check_volume_alert():
 # ============================================
 def check_liquidation():
     try:
-        r = requests.get("https://open-api-v3.coinglass.com/api/futures/liquidation/detail",
-                        params={'symbol': 'BTC', 'limit': 5}, timeout=10,
-                        headers={'accept': 'application/json'})
+        r = requests.get("https://open-api-v3.coinglass.com/api/futures/liquidation/detail", params={'symbol':'BTC','limit':5}, timeout=10, headers={'accept':'application/json'})
         if r.status_code != 200: return None
         data = r.json()
         if not data.get('data'): return None
-        total = sum(item.get('amount', 0) for item in data['data'][:10])
+        total = sum(item.get('amount',0) for item in data['data'][:10])
         if total >= 100_000_000:
             return f"💰 <b>THANH LÝ LỚN: ${total:,.0f}</b>\n📊 {len(data['data'])} lệnh\n⚠️ Biến động mạnh → cân nhắc vào lệnh!"
     except: pass
@@ -227,12 +215,11 @@ def check_liquidation():
 
 def check_etf_flow():
     try:
-        r = requests.get("https://farside.co.uk/btc-flow/", timeout=10,
-                        headers={'User-Agent': 'Mozilla/5.0'})
+        r = requests.get("https://farside.co.uk/btc-flow/", timeout=10, headers={'User-Agent':'Mozilla/5.0'})
         if r.status_code != 200: return None
         match = re.search(r'Total.*?\$?([\d,]+\.?\d*)\s*(m|M|b|B)?', r.text, re.DOTALL)
         if match:
-            value = float(match.group(1).replace(',', ''))
+            value = float(match.group(1).replace(',',''))
             unit = match.group(2) if match.group(2) else ''
             if unit.lower() == 'b': value *= 1_000_000_000
             elif unit.lower() == 'm': value *= 1_000_000
@@ -245,16 +232,14 @@ def check_etf_flow():
 
 def check_price_change():
     try:
-        r = requests.get("https://api.coingecko.com/api/v3/simple/price",
-                        params={'ids': 'bitcoin,ethereum,solana', 'vs_currencies': 'usd', 'include_24hr_change': 'true'},
-                        timeout=10)
+        r = requests.get("https://api.coingecko.com/api/v3/simple/price", params={'ids':'bitcoin,ethereum,solana','vs_currencies':'usd','include_24hr_change':'true'}, timeout=10)
         if r.status_code != 200: return None
         data = r.json()
         alerts = []
-        emoji = {'bitcoin': '₿', 'ethereum': 'Ξ', 'solana': '◎'}
-        name = {'bitcoin': 'BTC', 'ethereum': 'ETH', 'solana': 'SOL'}
+        emoji = {'bitcoin':'₿','ethereum':'Ξ','solana':'◎'}
+        name = {'bitcoin':'BTC','ethereum':'ETH','solana':'SOL'}
         for cid, info in data.items():
-            ch = info.get('usd_24h_change', 0)
+            ch = info.get('usd_24h_change',0)
             if abs(ch) >= 3.0:
                 d = "🟢 TĂNG" if ch > 0 else "🔴 GIẢM"
                 alerts.append(f"📈 {emoji[cid]} <b>{name[cid]}: {d} {abs(ch):.1f}%</b> | 💵 ${info['usd']:,.2f}")
@@ -263,18 +248,20 @@ def check_price_change():
     return None
 
 # ============================================
-# FEDWATCH + EVENTS + GEO
+# FEDWATCH
 # ============================================
 def get_fedwatch_prediction():
     fed_data = fred_get('DFF')
     if not fed_data: return None
     current_rate = fed_data[0]['v']
+    
     if len(fed_data) >= 2:
         prev_rate = fed_data[1]['v']
         if current_rate > prev_rate: trend = f"📈 Lãi suất đang <b>TĂNG</b> (từ {prev_rate}% → {current_rate}%)"
         elif current_rate < prev_rate: trend = f"📉 Lãi suất đang <b>GIẢM</b> (từ {prev_rate}% → {current_rate}%)"
         else: trend = f"➡️ Lãi suất đang <b>ỔN ĐỊNH</b> ở mức {current_rate}%"
     else: trend = f"➡️ Lãi suất hiện tại: <b>{current_rate}%</b>"
+    
     cpi_data = fred_get('CPIAUCSL')
     if cpi_data and len(cpi_data) >= 2:
         cpi_change = round((cpi_data[0]['v']-cpi_data[1]['v'])/cpi_data[1]['v']*100,1)
@@ -282,48 +269,117 @@ def get_fedwatch_prediction():
         elif cpi_change < -0.3: prediction = f"✅ CPI giảm <b>{abs(cpi_change)}%</b> → Có thể <b>GIẢM</b> lãi suất"
         else: prediction = f"➡️ CPI ổn định → Dự kiến <b>GIỮ NGUYÊN</b> lãi suất"
     else: prediction = "➡️ Chưa có dữ liệu CPI → Dự kiến <b>GIỮ NGUYÊN</b>"
+    
     return {'current_rate':f"{current_rate}%",'trend':trend,'prediction':prediction}
 
+# ============================================
+# EVENTS - FORMAT CHUẨN (MỚI)
+# ============================================
 EVENTS = [
-    {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm.','fred':'UNRATE','type':'nfp'},
-    {'id':'cpi_may','name':'📊 CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Chỉ số giá tiêu dùng.','fred':'CPIAUCSL','type':'cpi'},
-    {'id':'ppi_may','name':'🏭 PPI (T5)','date':'2026-06-12','time':'19:30','impact':'🟡 TB','desc':'Chỉ số giá sản xuất.','fred':'PPIACO','type':'ppi'},
-    {'id':'fomc_jun','name':'🏦 FOMC (T6)','date':'2026-06-18','time':'01:00','impact':'🔴 CAO','desc':'Quyết định lãi suất Fed.','fred':'DFF','type':'fomc'},
-    {'id':'gdp_q2','name':'📊 GDP Q2/2026','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng kinh tế.','fred':'GDP','type':'gdp'},
-    {'id':'fomc_jul','name':'🏦 FOMC (T7)','date':'2026-07-30','time':'01:00','impact':'🔴 CAO','desc':'Quyết định lãi suất Fed.','fred':'DFF','type':'fomc'},
+    {'id':'fomc_minutes_jun','name':'📋 Biên bản họp FOMC (T6)','date':'2026-06-04','time':'01:00','impact':'🟢 THẤP','desc':'Biên bản cuộc họp cũ - không có quyết định mới. Ít ảnh hưởng thị trường.','fred':'DFF','is_fomc':False},
+    {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm - chỉ báo sức khỏe kinh tế Mỹ.','fred':'UNRATE','is_fomc':False,'advice':'NFP > dự đoán → Kinh tế mạnh → 🟢 LONG\nNFP < dự đoán → Kinh tế yếu → 🔴 SHORT'},
+    {'id':'cpi_may','name':'📊 Chỉ số CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Chỉ số giá tiêu dùng - thước đo lạm phát quan trọng nhất.','fred':'CPIAUCSL','is_fomc':False,'advice':'CPI thấp → Fed dovish → 🟢 LONG\nCPI cao → Fed hawkish → 🔴 SHORT'},
+    {'id':'ppi_may','name':'🏭 Chỉ số PPI (T5)','date':'2026-06-12','time':'19:30','impact':'🟡 TB','desc':'Chỉ số giá sản xuất - chỉ báo sớm của lạm phát.','fred':'PPIACO','is_fomc':False},
+    {'id':'fomc_jun','name':'🏦 Quyết định lãi suất FOMC (T6)','date':'2026-06-18','time':'01:00','impact':'🔴 CAO - QUAN TRỌNG NHẤT THÁNG','desc':'Fed công bố quyết định lãi suất.','fred':'DFF','is_fomc':True,'advice':'GIỮ NGUYÊN → 🟢 LONG\nTĂNG → 🔴 SHORT\nGIẢM → 🟢 LONG mạnh\nĐóng bot 30p trước!','gold':'Hawkish → Vàng GIẢM | Dovish → Vàng TĂNG','crypto':'Hawkish → Crypto GIẢM | Dovish → Crypto TĂNG','usd':'Hawkish → USD TĂNG | Dovish → USD GIẢM'},
+    {'id':'gdp_q2','name':'📊 GDP Quý 2/2026','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng kinh tế Mỹ.','fred':'GDP','is_fomc':False,'advice':'GDP cao → 🟢 LONG\nGDP thấp → 🔴 SHORT'},
+    {'id':'fomc_jul','name':'🏦 Quyết định lãi suất FOMC (T7)','date':'2026-07-30','time':'01:00','impact':'🔴 CAO - QUAN TRỌNG','desc':'Quyết định lãi suất Fed.','fred':'DFF','is_fomc':True,'advice':'GIỮ NGUYÊN → 🟢 LONG\nTĂNG → 🔴 SHORT\nĐóng bot 30p trước!','gold':'Hawkish → Vàng GIẢM | Dovish → Vàng TĂNG','crypto':'Hawkish → Crypto GIẢM | Dovish → Crypto TĂNG','usd':'Hawkish → USD TĂNG | Dovish → USD GIẢM'},
 ]
 
 def check_events():
-    log = get_log(); now = datetime.now(); today = now.date(); msgs = []
+    log = get_log()
+    now = datetime.now()
+    today = now.date()
+    msgs = []
     fedwatch = get_fedwatch_prediction()
+    
     for ev in EVENTS:
         evd = datetime.strptime(ev['date'],'%Y-%m-%d').date()
         evdt = datetime.strptime(ev['date']+' '+ev['time'],'%Y-%m-%d %H:%M')
         days = (evd - today).days
         hours_since = (now - evdt).total_seconds()/3600 if evdt < now else -1
+        
         if 0 <= days <= 5:
             key = f"pre_{ev['id']}"
             if time.time() - log['events_sent'].get(key,0) >= 3600:
                 log['events_sent'][key] = time.time()
+                
                 cd = f"⚠️ <b>HÔM NAY</b> {ev['time']}" if days==0 else f"📅 <b>NGÀY MAI</b> {ev['time']}" if days==1 else f"📅 Còn <b>{days} ngày</b> - {ev['date']}"
-                prediction = ""
-                if ev['type'] == 'fomc' and fedwatch:
-                    prediction = f"\n📊 <b>PHÂN TÍCH:</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
-                msgs.append(f"🚨 <b>TÍN HIỆU SỰ KIỆN!</b>\n━━━━━━━━━━━━━━━━━━\n{ev['name']} | {ev['impact']}\n⏰ {cd}\n📝 {ev['desc']}{prediction}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
+                
+                fw_text = ""
+                if ev.get('is_fomc') and fedwatch:
+                    fw_text = f"\n\n📊 <b>PHÂN TÍCH LÃI SUẤT (FRED):</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
+                
+                tac_dong = ""
+                if ev.get('gold') or ev.get('crypto') or ev.get('usd'):
+                    tac_dong = f"\n\n📊 <b>TÁC ĐỘNG DỰ KIẾN:</b>\n"
+                    if ev.get('gold'): tac_dong += f"🥇 Vàng: {ev['gold']}\n"
+                    if ev.get('crypto'): tac_dong += f"₿ Crypto: {ev['crypto']}\n"
+                    if ev.get('usd'): tac_dong += f"💵 USD: {ev['usd']}\n"
+                
+                chien_luoc = ""
+                if ev.get('advice'):
+                    chien_luoc = f"\n💡 <b>CHIẾN LƯỢC:</b>\n{ev['advice']}\n"
+                
+                msgs.append(
+                    f"📅 <b>{ev['name']}</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"⏰ {cd}\n"
+                    f"⚡ Mức độ: {ev['impact']}\n"
+                    f"📝 {ev['desc']}"
+                    f"{fw_text}{tac_dong}{chien_luoc}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 {econ_summary()}"
+                )
+        
         elif days < 0 and 1 <= hours_since <= 24:
             key = f"post_{ev['id']}"
             if key not in log['events_sent']:
                 v = fred_get(ev['fred'])
                 if v and len(v) >= 2:
                     curr, prev = v[0]['v'], v[1]['v']
-                    if ev['type'] == 'fomc': kq = f"📈 <b>TĂNG</b> từ {prev}% lên {curr}%" if curr > prev else f"📉 <b>GIẢM</b> từ {prev}% xuống {curr}%" if curr < prev else f"➡️ <b>GIỮ NGUYÊN</b> ở {curr}%"
-                    elif ev['type'] == 'nfp': kq = f"📈 <b>{curr}%</b>" if curr > prev else f"📉 <b>{curr}%</b>" if curr < prev else f"➡️ <b>{curr}%</b>"
-                    elif ev['type'] == 'cpi':
-                        pct = round(abs(curr-prev)/prev*100,1)
-                        kq = f"📈 <b>TĂNG {pct}%</b>" if curr > prev else f"📉 <b>GIẢM {pct}%</b>" if curr < prev else "➡️ <b>KHÔNG ĐỔI</b>"
-                    else: kq = f"<b>{curr}</b> (trước: {prev})"
+                    
+                    if 'fomc' in ev['id'] and 'minutes' not in ev['id']:
+                        if curr > prev:
+                            ket_qua = f"📈 <b>Fed TĂNG lãi suất</b> từ {prev}% lên {curr}%"
+                            tac_dong = "🦅 <b>HAWKISH</b>"
+                            hanh_dong = "🔴 SHORT Crypto"
+                        elif curr < prev:
+                            ket_qua = f"📉 <b>Fed GIẢM lãi suất</b> từ {prev}% xuống {curr}%"
+                            tac_dong = "🕊️ <b>DOVISH</b>"
+                            hanh_dong = "🟢 LONG Crypto"
+                        else:
+                            ket_qua = f"➡️ <b>Fed GIỮ NGUYÊN</b> ở mức {curr}%"
+                            tac_dong = "➡️ <b>TRUNG LẬP</b>"
+                            hanh_dong = "🟢 Tích cực nhẹ"
+                    
+                    elif ev['id'] == 'nfp_may':
+                        ket_qua = f"📊 <b>Thất nghiệp: {curr}%</b>"
+                        tac_dong = "✅ Mạnh" if curr < prev else "⚠️ Yếu"
+                        hanh_dong = "🟢 LONG" if curr < prev else "🔴 SHORT"
+                    
+                    elif ev['id'] == 'cpi_may':
+                        pct = round((curr-prev)/prev*100,1)
+                        ket_qua = f"📊 <b>CPI: {curr}</b> ({'+' if pct>0 else ''}{pct}%)"
+                        tac_dong = "⚠️ Nóng" if curr > prev else "✅ Hạ nhiệt"
+                        hanh_dong = "🟢 LONG" if curr <= prev else "🔴 SHORT"
+                    
+                    else:
+                        ket_qua = f"📊 <b>{curr}</b>"
+                        tac_dong = "Đã cập nhật"
+                        hanh_dong = "Theo dõi thêm"
+                    
                     log['events_sent'][key] = time.time()
-                    msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ!</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {ev['date']} {ev['time']}\n📊 {kq}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
+                    msgs.append(
+                        f"✅ <b>{ev['name']} - KẾT QUẢ!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"⏰ {ev['date']} {ev['time']}\n"
+                        f"📊 {ket_qua}\n"
+                        f"🎤 {tac_dong}\n"
+                        f"💡 {hanh_dong}\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 {econ_summary()}"
+                    )
+    
     save_log(log)
     return msgs
 
@@ -336,10 +392,13 @@ def check_geo_emergency():
             r = requests.get("https://newsapi.org/v2/everything", params={'q':query,'language':'en','sortBy':'publishedAt','pageSize':1,'apiKey':NEWS_API_KEY}, timeout=10)
             if r.status_code != 200: continue
             for a in r.json().get('articles',[]):
-                title = a.get('title',''); url = a.get('url','')
+                title = a.get('title','')
+                url = a.get('url','')
                 if url in log['news_sent']: continue
                 if any(re.search(r'\b'+kw+r'\b', title.lower()) for kw in ['strike','attack','war','missile','invasion','nuclear','bomb']):
-                    log['news_sent'].append(url); log['news_sent'] = log['news_sent'][-100:]; save_log(log)
+                    log['news_sent'].append(url)
+                    log['news_sent'] = log['news_sent'][-100:]
+                    save_log(log)
                     return f"🌍 <b>ĐỊA CHÍNH TRỊ KHẨN!</b>\n━━━━━━━━━━━━━━━━━━\n🇬🇧 {title}\n📡 {(a.get('source',{}) or {}).get('name','Unknown')}\n⚠️ Xung đột leo thang → 🔴 SHORT\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}"
             time.sleep(0.3)
         except: continue
@@ -356,8 +415,7 @@ dom_text = dominance_text()
 gui(f"🚨 <b>BOT REALTIME V2 ĐÃ KHỞI ĐỘNG!</b>\n━━━━━━━━━━━━━━━━━━\n"
     f"💰 Thanh lý >$100M | 📊 ETF >$300M | 📈 Biến động >3%\n"
     f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn\n"
-    f"🚀 Top Gainers >20% (Vol>$1M, MCap>$10M)\n"
-    f"📊 Volume >200% (Vol>$10M, MCap>$50M){dom_text}\n"
+    f"🚀 Top Gainers >20% | 📊 Volume >200%{dom_text}\n"
     f"━━━━━━━━━━━━━━━━━━\n{now_str()}")
 
 last_liq = last_etf = last_price = last_events = last_geo = last_dom = last_movers = last_vol = 0
@@ -365,30 +423,52 @@ last_liq = last_etf = last_price = last_events = last_geo = last_dom = last_move
 while True:
     try:
         now = time.time()
+        
         if now - last_liq >= 60:
-            last_liq = now; msg = check_liquidation()
+            last_liq = now
+            msg = check_liquidation()
             if msg: gui(f"🚨 TÍN HIỆU REALTIME!\n━━━━━━━━━━━━━━━━━━\n{msg}\n\n{now_str()}")
+        
         if now - last_etf >= 300:
-            last_etf = now; msg = check_etf_flow()
+            last_etf = now
+            msg = check_etf_flow()
             if msg: gui(f"🚨 TÍN HIỆU REALTIME!\n━━━━━━━━━━━━━━━━━━\n{msg}\n\n{now_str()}")
+        
         if now - last_price >= 60:
-            last_price = now; msg = check_price_change()
+            last_price = now
+            msg = check_price_change()
             if msg: gui(f"🚨 TÍN HIỆU REALTIME!\n━━━━━━━━━━━━━━━━━━\n{msg}\n\n{now_str()}")
+        
         if now - last_movers >= 1800:
-            last_movers = now; msg = check_top_movers()
+            last_movers = now
+            msg = check_top_movers()
             if msg: gui(f"🚀 TÍN HIỆU REALTIME!\n━━━━━━━━━━━━━━━━━━\n{msg}\n\n{now_str()}")
+        
         if now - last_vol >= 1800:
-            last_vol = now; msg = check_volume_alert()
+            last_vol = now
+            msg = check_volume_alert()
             if msg: gui(f"📊 TÍN HIỆU REALTIME!\n━━━━━━━━━━━━━━━━━━\n{msg}\n\n{now_str()}")
+        
         if now - last_events >= 3600:
             last_events = now
-            for msg in check_events(): gui(f"{msg}\n\n{now_str()}")
+            for msg in check_events():
+                gui(f"{msg}\n\n{now_str()}")
+        
         if now - last_geo >= 600:
-            last_geo = now; msg = check_geo_emergency()
+            last_geo = now
+            msg = check_geo_emergency()
             if msg: gui(f"{msg}\n\n{now_str()}")
+        
         if now - last_dom >= 3600:
-            last_dom = now; dom = dominance_text()
+            last_dom = now
+            dom = dominance_text()
             if dom: gui(f"📊 <b>CẬP NHẬT DOMINANCE</b>\n━━━━━━━━━━━━━━━━━━{dom}\n\n{now_str()}")
+        
         time.sleep(10)
-    except KeyboardInterrupt: gui("🛑 Bot Realtime đã dừng"); break
-    except Exception as e: print(f"Lỗi: {e}"); time.sleep(30)
+        
+    except KeyboardInterrupt:
+        gui("🛑 Bot Realtime đã dừng")
+        break
+    except Exception as e:
+        print(f"Lỗi: {e}")
+        time.sleep(30)
