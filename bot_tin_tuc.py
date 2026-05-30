@@ -1,10 +1,10 @@
 """
-BOT TIN TUC - NEWSAPI + RSS FEEDS - FINAL FINAL
+BOT TIN TUC - NEWSAPI + RSS FEEDS - PRO FINAL
 - 5 nguồn RSS miễn phí: Reuters, CNBC, CoinDesk, Cointelegraph, MarketWatch
 - NewsAPI bổ sung
 - Dịch tiếng Việt chuẩn Google Translate + sửa từ khóa tài chính
 - Context analysis: hiểu ngữ cảnh, không chỉ đếm từ khóa
-- FedWatch từ FRED (dữ liệu thực tế)
+- FedWatch từ FRED - logic rõ ràng, không mâu thuẫn
 - Lọc tin không liên quan thị trường
 - Post-event tự động báo cáo kết quả
 - Sự kiện trước 5 ngày + báo cáo sau 1-24h
@@ -134,22 +134,18 @@ FIX_DICH = {
     "tiền điện tử": "crypto", "tiền mã hóa": "crypto",
     "chuỗi khối": "blockchain",
     "dòng tiền chảy ra": "dòng vốn ETF ra", "dòng tiền chảy vào": "dòng vốn ETF vào",
-    "trú ẩn an toàn": "tài sản trú ẩn", "nơi trú ẩn an toàn": "tài sản trú ẩn",
+    "trú ẩn an toàn": "tài sản trú ẩn",
     "eo biển hormuz": "eo biển Hormuz",
     "cục dự trữ liên bang": "Fed", "ngân hàng trung ương mỹ": "Fed",
-    "hợp đồng tương lai": "futures",
     "quỹ giao dịch trao đổi": "ETF",
     "bảng lương phi nông nghiệp": "bảng lương NFP",
     "chỉ số giá tiêu dùng": "CPI", "chỉ số giá sản xuất": "PPI",
     "tổng sản phẩm quốc nội": "GDP",
-    "chiến tranh thương mại": "chiến tranh thương mại",
-    "trần nợ": "trần nợ công", "nới lỏng định lượng": "QE",
     "phố wall": "Phố Wall", "nhà trắng": "Nhà Trắng",
     "lầu năm góc": "Lầu Năm Góc", "điện kremlin": "Điện Kremlin",
-    "vốn hóa thị trường": "vốn hóa", "nhà đầu tư tổ chức": "tổ chức",
-    "chấp nhận rộng rãi": "chấp nhận", "quy định pháp lý": "quy định",
-    "thị trường chứng khoán": "chứng khoán", "trái phiếu chính phủ": "trái phiếu",
-    "lợi suất trái phiếu": "lợi suất", "chỉ số đô la mỹ": "DXY",
+    "vốn hóa thị trường": "vốn hóa",
+    "thị trường chứng khoán": "chứng khoán",
+    "lợi suất trái phiếu": "lợi suất",
     "dầu thô": "dầu", "giá dầu": "giá dầu",
 }
 
@@ -174,7 +170,7 @@ def dich_tieng_viet_chuan(text):
     return translated
 
 # ============================================
-# FEDWATCH - DUNG FRED TRUC TIEP
+# FEDWATCH - LOGIC RO RANG
 # ============================================
 def get_fedwatch_prediction():
     fed_data = fred_get('DFF')
@@ -185,25 +181,25 @@ def get_fedwatch_prediction():
     if len(fed_data) >= 2:
         prev_rate = fed_data[1]['v']
         if current_rate > prev_rate:
-            trend = f"📈 Xu hướng: <b>TĂNG</b> (từ {prev_rate}% lên {current_rate}%)"
+            trend = f"📈 Lãi suất đang <b>TĂNG</b> (từ {prev_rate}% → {current_rate}%)"
         elif current_rate < prev_rate:
-            trend = f"📉 Xu hướng: <b>GIẢM</b> (từ {prev_rate}% xuống {current_rate}%)"
+            trend = f"📉 Lãi suất đang <b>GIẢM</b> (từ {prev_rate}% → {current_rate}%)"
         else:
-            trend = f"➡️ Xu hướng: <b>ỔN ĐỊNH</b> (giữ ở {current_rate}%)"
+            trend = f"➡️ Lãi suất đang <b>ỔN ĐỊNH</b> ở mức {current_rate}%"
     else:
         trend = f"➡️ Lãi suất hiện tại: <b>{current_rate}%</b>"
     
     cpi_data = fred_get('CPIAUCSL')
     if cpi_data and len(cpi_data) >= 2:
-        cpi_change = (cpi_data[0]['v'] - cpi_data[1]['v']) / cpi_data[1]['v'] * 100
+        cpi_change = round((cpi_data[0]['v'] - cpi_data[1]['v']) / cpi_data[1]['v'] * 100, 1)
         if cpi_change > 0.3:
-            prediction = f"📈 <b>Khả năng TĂNG lãi suất</b> (CPI tăng {cpi_change:.1f}%)"
+            prediction = f"⚠️ CPI tăng <b>{cpi_change}%</b> → Áp lực <b>TĂNG</b> lãi suất"
         elif cpi_change < -0.3:
-            prediction = f"📉 <b>Khả năng GIẢM lãi suất</b> (CPI giảm {abs(cpi_change):.1f}%)"
+            prediction = f"✅ CPI giảm <b>{abs(cpi_change)}%</b> → Có thể <b>GIẢM</b> lãi suất"
         else:
-            prediction = "➡️ <b>Khả năng GIỮ NGUYÊN</b> (CPI ổn định)"
+            prediction = f"➡️ CPI ổn định → Dự kiến <b>GIỮ NGUYÊN</b> lãi suất"
     else:
-        prediction = "➡️ <b>Dự kiến GIỮ NGUYÊN</b> (chưa có áp lực thay đổi)"
+        prediction = "➡️ Chưa có dữ liệu CPI → Dự kiến <b>GIỮ NGUYÊN</b>"
     
     return {
         'current_rate': f"{current_rate}%",
@@ -222,7 +218,7 @@ def is_market_news(title):
     return True
 
 # ============================================
-# CONTEXT ANALYSIS - HIỂU NGỮ CẢNH
+# CONTEXT ANALYSIS
 # ============================================
 CONTEXT_POSITIVE = [
     "ceasefire", "truce", "peace deal", "peace talk", "reopening", "withdrawal",
@@ -230,11 +226,10 @@ CONTEXT_POSITIVE = [
     "surge", "soar", "rally", "record high", "bull market",
     "etf approved", "etf inflow", "institutional", "adoption",
     "oil prices drop", "oil prices fall", "oil prices decline",
-    "price drop", "price fall", "price decline", "prices drop",
-    "stock surge", "stock rally", "stock soar", "stocks surge",
-    "market rally", "market surge", "market rebound",
-    "gold decline", "gold drop", "gold fall", "gold slips",
-    "stronger nato", "nato stronger", "nato strength"
+    "price drop", "price fall", "price decline",
+    "stock surge", "stock rally", "market rally", "market surge",
+    "gold decline", "gold drop", "gold fall",
+    "stronger nato", "nato stronger"
 ]
 
 CONTEXT_NEGATIVE = [
@@ -244,8 +239,7 @@ CONTEXT_NEGATIVE = [
     "crash", "collapse", "plunge", "tumble", "slump",
     "etf outflow", "sanction imposed", "tariff imposed",
     "nuclear threat", "nuclear weapon", "military escalation",
-    "stock plunge", "stock tumble", "stock crash", "stocks plunge",
-    "market crash", "market collapse", "market turmoil",
+    "stock plunge", "stock crash", "market crash", "market turmoil",
     "gold surge", "gold soar", "gold spike", "gold rally"
 ]
 
@@ -272,21 +266,17 @@ def phan_tich_tin(title, description=""):
     
     t = (title + " " + description).lower()
     
-    # Context rules (trọng số 3)
     pos_context = sum(1 for ctx in CONTEXT_POSITIVE if ctx in t)
     neg_context = sum(1 for ctx in CONTEXT_NEGATIVE if ctx in t)
     
-    # Từ khóa đơn (trọng số 1)
     pos_kw = [kw for kw in POSITIVE_KW if has_keyword(t, kw)]
     neg_kw = [kw for kw in NEGATIVE_KW if has_keyword(t, kw)]
     
-    # Điểm tổng
     pos_score = pos_context * 3 + len(pos_kw)
     neg_score = neg_context * 3 + len(neg_kw)
     
     if pos_score == 0 and neg_score == 0: return None
     
-    # Keywords hiển thị: ưu tiên context rules
     display_kw = []
     for ctx in CONTEXT_POSITIVE:
         if ctx in t and len(display_kw) < 3: display_kw.append(ctx)
@@ -539,7 +529,7 @@ def check_events():
                 
                 fw_text = ""
                 if ev.get('is_fomc') and fedwatch:
-                    fw_text = f"\n\n📊 <b>DỰ ĐOÁN ({fedwatch['source']}):</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Lãi suất hiện tại: {fedwatch['current_rate']}"
+                    fw_text = f"\n\n📊 <b>PHÂN TÍCH LÃI SUẤT ({fedwatch['source']}):</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
                 
                 msgs.append(f"📅 <b>{ev['name']}</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {cd}\n⚡ Mức độ: {ev['impact']}\n📝 {ev['desc']}{fw_text}\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}\n\n{now_str()}")
         

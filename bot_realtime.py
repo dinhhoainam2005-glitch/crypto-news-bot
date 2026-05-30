@@ -5,7 +5,7 @@ BOT REALTIME V2 - TICH HOP TAT CA TIN HIEU
 - Biến động giá >3% (CoinGecko)
 - Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
 - Địa chính trị khẩn cấp (NewsAPI)
-- Dự đoán xu hướng lãi suất, lạm phát
+- FedWatch logic rõ ràng - không mâu thuẫn
 - Cảnh báo trước 5 ngày + kết quả sau sự kiện
 """
 import requests
@@ -123,7 +123,46 @@ def check_price_change():
     return None
 
 # ============================================
-# 4. SU KIEN KINH TE (FRED)
+# 4. FEDWATCH - LOGIC RO RANG
+# ============================================
+def get_fedwatch_prediction():
+    fed_data = fred_get('DFF')
+    if not fed_data: return None
+    
+    current_rate = fed_data[0]['v']
+    
+    if len(fed_data) >= 2:
+        prev_rate = fed_data[1]['v']
+        if current_rate > prev_rate:
+            trend = f"📈 Lãi suất đang <b>TĂNG</b> (từ {prev_rate}% → {current_rate}%)"
+        elif current_rate < prev_rate:
+            trend = f"📉 Lãi suất đang <b>GIẢM</b> (từ {prev_rate}% → {current_rate}%)"
+        else:
+            trend = f"➡️ Lãi suất đang <b>ỔN ĐỊNH</b> ở mức {current_rate}%"
+    else:
+        trend = f"➡️ Lãi suất hiện tại: <b>{current_rate}%</b>"
+    
+    cpi_data = fred_get('CPIAUCSL')
+    if cpi_data and len(cpi_data) >= 2:
+        cpi_change = round((cpi_data[0]['v'] - cpi_data[1]['v']) / cpi_data[1]['v'] * 100, 1)
+        if cpi_change > 0.3:
+            prediction = f"⚠️ CPI tăng <b>{cpi_change}%</b> → Áp lực <b>TĂNG</b> lãi suất"
+        elif cpi_change < -0.3:
+            prediction = f"✅ CPI giảm <b>{abs(cpi_change)}%</b> → Có thể <b>GIẢM</b> lãi suất"
+        else:
+            prediction = f"➡️ CPI ổn định → Dự kiến <b>GIỮ NGUYÊN</b> lãi suất"
+    else:
+        prediction = "➡️ Chưa có dữ liệu CPI → Dự kiến <b>GIỮ NGUYÊN</b>"
+    
+    return {
+        'current_rate': f"{current_rate}%",
+        'trend': trend,
+        'prediction': prediction,
+        'source': 'FRED (dữ liệu thực tế)'
+    }
+
+# ============================================
+# 5. SU KIEN KINH TE
 # ============================================
 EVENTS = [
     {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm phi nông nghiệp Mỹ.','fred':'UNRATE','type':'nfp'},
@@ -139,6 +178,7 @@ def check_events():
     now = datetime.now()
     today = now.date()
     msgs = []
+    fedwatch = get_fedwatch_prediction()
     
     for ev in EVENTS:
         evd = datetime.strptime(ev['date'], '%Y-%m-%d').date()
@@ -146,7 +186,7 @@ def check_events():
         days = (evd - today).days
         hours_since = (now - evdt).total_seconds()/3600 if evdt < now else -1
         
-        # PRE-EVENT: 0-5 ngày
+        # PRE-EVENT
         if 0 <= days <= 5:
             key = f"pre_{ev['id']}"
             if time.time() - log['events_sent'].get(key, 0) >= 3600:
@@ -156,44 +196,29 @@ def check_events():
                      f"📅 <b>NGÀY MAI</b> {ev['time']}" if days==1 else \
                      f"📅 Còn <b>{days} ngày</b> - {ev['date']}"
                 
-                # Dự đoán
                 prediction = ""
                 v = fred_get(ev['fred'])
                 if v:
                     curr = v[0]['v']
                     if ev['type'] == 'fomc':
-                        if len(v) >= 2 and v[0]['v'] == v[1]['v']:
-                            prediction = "\n📊 <b>DỰ ĐOÁN: ➡️ GIỮ NGUYÊN</b> (lãi suất ổn định)"
-                            prediction += f"\n💡 HÀNH ĐỘNG: Giữ nguyên → 🟢 Tích cực cho Crypto"
-                        elif len(v) >= 2 and v[0]['v'] > v[1]['v']:
-                            prediction = "\n📊 <b>DỰ ĐOÁN: 📈 TĂNG</b> (xu hướng hawkish)"
-                            prediction += "\n💡 HÀNH ĐỘNG: Tăng lãi suất → 🔴 SHORT"
+                        if fedwatch:
+                            prediction = f"\n📊 <b>PHÂN TÍCH LÃI SUẤT:</b>\n{fedwatch['trend']}\n{fedwatch['prediction']}\n🏦 Hiện tại: {fedwatch['current_rate']}"
                         else:
-                            prediction = "\n📊 <b>DỰ ĐOÁN: 📉 GIẢM</b> (xu hướng dovish)"
-                            prediction += "\n💡 HÀNH ĐỘNG: Giảm lãi suất → 🟢 LONG"
+                            prediction = f"\n📊 <b>LÃI SUẤT:</b> {curr}%"
                     elif ev['type'] == 'cpi':
-                        if len(v) >= 2 and v[0]['v'] > v[1]['v']:
-                            prediction = f"\n📊 <b>DỰ ĐOÁN: 📈 CPI TĂNG</b> (lạm phát nóng)"
-                            prediction += "\n⚠️ CPI cao → Fed hawkish → 🔴 SHORT"
-                        else:
-                            prediction = f"\n📊 <b>DỰ ĐOÁN: CPI ỔN ĐỊNH/GIẢM</b>"
-                            prediction += "\n✅ CPI thấp → Fed dovish → 🟢 LONG"
+                        if len(v) >= 2:
+                            ch = round((v[0]['v']-v[1]['v'])/v[1]['v']*100, 1)
+                            prediction = f"\n📊 <b>CPI HIỆN TẠI:</b> {curr} ({'+' if ch>0 else ''}{ch}%)"
                     elif ev['type'] == 'nfp':
-                        prediction = f"\n📊 <b>TỶ LỆ THẤT NGHIỆP: {curr}%</b>"
-                        if curr < 4: prediction += "\n✅ Thất nghiệp thấp → kinh tế mạnh → 🟢 LONG"
-                        else: prediction += "\n⚠️ Thất nghiệp cao → kinh tế yếu → 🔴 SHORT"
+                        prediction = f"\n📊 <b>THẤT NGHIỆP:</b> {curr}%"
                     elif ev['type'] == 'gdp':
-                        prediction = f"\n📊 <b>GDP HIỆN TẠI: ${curr:,.0f}B</b>"
-                        if len(v) >= 2 and v[0]['v'] > v[1]['v']:
-                            prediction += "\n✅ Tăng trưởng → 🟢 LONG"
-                        else:
-                            prediction += "\n⚠️ Suy giảm → 🔴 SHORT"
+                        prediction = f"\n📊 <b>GDP:</b> ${curr:,.0f}B"
                 
                 msgs.append(f"🚨 <b>TÍN HIỆU SỰ KIỆN!</b>\n━━━━━━━━━━━━━━━━━━\n"
                           f"{ev['name']} | {ev['impact']}\n⏰ {cd}\n📝 {ev['desc']}"
                           f"{prediction}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}")
         
-        # POST-EVENT: 1-24h sau
+        # POST-EVENT
         elif days < 0 and 1 <= hours_since <= 24:
             key = f"post_{ev['id']}"
             if key not in log['events_sent']:
@@ -206,8 +231,8 @@ def check_events():
                         elif curr < prev: kq = f"📉 <b>GIẢM</b> từ {prev}% xuống {curr}%"
                         else: kq = f"➡️ <b>GIỮ NGUYÊN</b> ở {curr}%"
                     elif ev['type'] == 'nfp':
-                        if curr > prev: kq = f"📈 <b>TĂNG</b> lên {curr}% (lao động yếu)"
-                        elif curr < prev: kq = f"📉 <b>GIẢM</b> xuống {curr}% (lao động mạnh)"
+                        if curr > prev: kq = f"📈 <b>TĂNG</b> lên {curr}%"
+                        elif curr < prev: kq = f"📉 <b>GIẢM</b> xuống {curr}%"
                         else: kq = f"➡️ <b>KHÔNG ĐỔI</b> ở {curr}%"
                     elif ev['type'] == 'cpi':
                         pct = round(abs(curr-prev)/prev*100, 1)
@@ -225,7 +250,7 @@ def check_events():
     return msgs
 
 # ============================================
-# 5. DIA CHINH TRI KHAN CAP (NEWSAPI)
+# 6. DIA CHINH TRI KHAN CAP
 # ============================================
 GEO_QUERIES = ["iran israel war", "russia ukraine attack", "north korea missile", "china taiwan war"]
 
@@ -244,7 +269,6 @@ def check_geo_emergency():
                 url = a.get('url', '')
                 if url in log['news_sent']: continue
                 
-                # Từ khóa khẩn cấp
                 emergency_kw = ['strike', 'attack', 'war', 'missile', 'invasion', 'nuclear', 'bomb']
                 if any(re.search(r'\b' + kw + r'\b', title.lower()) for kw in emergency_kw):
                     log['news_sent'].append(url)
@@ -273,7 +297,6 @@ while True:
     try:
         now = time.time()
         
-        # Realtime signals (60-300s)
         if now - last_liq >= 60:
             last_liq = now
             msg = check_liquidation()
@@ -289,13 +312,11 @@ while True:
             msg = check_price_change()
             if msg: gui(f"🚨 TÍN HIỆU REALTIME!\n━━━━━━━━━━━━━━━━━━\n{msg}\n\n{now_str()}")
         
-        # Events (3600s = 1h)
         if now - last_events >= 3600:
             last_events = now
             for msg in check_events():
                 gui(f"{msg}\n\n{now_str()}")
         
-        # Geo emergency (600s = 10min)
         if now - last_geo >= 600:
             last_geo = now
             msg = check_geo_emergency()
