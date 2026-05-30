@@ -1,6 +1,6 @@
 """
 BOT TIN TUC - NEWSAPI + RSS FEEDS - PRO FINAL
-- 5 nguồn RSS: Reuters, CNBC, CoinDesk, Cointelegraph, MarketWatch
+- 8 nguồn RSS: Reuters, CNBC, CoinDesk, Cointelegraph, MarketWatch, Google News, Yahoo Finance, Reddit
 - NewsAPI bổ sung
 - Dịch tiếng Việt chuẩn Google Translate + sửa từ khóa tài chính
 - Context analysis: hiểu ngữ cảnh, không chỉ đếm từ khóa
@@ -61,6 +61,9 @@ RSS_FEEDS = [
     ("https://www.coindesk.com/arc/outboundfeeds/news/", "CoinDesk"),
     ("https://cointelegraph.com/rss", "Cointelegraph"),
     ("https://feeds.marketwatch.com/marketwatch/topstories", "MarketWatch"),
+    ("https://news.google.com/rss/search?q=crypto+bitcoin+when:24h&hl=en-US&gl=US&ceid=US:en", "Google News"),
+    ("https://finance.yahoo.com/news/rssindex", "Yahoo Finance"),
+    ("https://www.reddit.com/r/CryptoCurrency/.rss", "Reddit Crypto"),
 ]
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -688,7 +691,7 @@ while True:
             
             news = fetch_all_news()
             label = "đã khởi động" if s.get('started_ever') else "cập nhật 6h"
-            rss_count = sum(1 for n in news if n['source'] in ['Reuters', 'CNBC', 'CoinDesk', 'Cointelegraph', 'MarketWatch'])
+            rss_count = sum(1 for n in news if n['source'] in ['Reuters', 'CNBC', 'CoinDesk', 'Cointelegraph', 'MarketWatch', 'Google News', 'Yahoo Finance', 'Reddit Crypto'])
             dom_text = dominance_text()
             
             gui(f"📰 <b>BẢN TIN THỊ TRƯỜNG {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED: {'✅' if fred_ok() else '⏳'} | RSS: ✅ {rss_count} tin | NewsAPI: ✅\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}{dom_text}\n\n📋 Phát hiện <b>{len(news)} tin</b>\n\n{now_str()}")
