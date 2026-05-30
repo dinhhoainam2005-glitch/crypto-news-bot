@@ -24,6 +24,8 @@ CHU_KY = 300
 NGUONG_DIEM_TREND = 6
 NGUONG_DIEM_SIDEWAY = 5
 ADX_SIDEWAY = 20
+RR_TOI_THIEU_V16 = 1.5
+RR_TOI_THIEU_SCALP = 1.2
 
 tin_hieu_cu = {}
 scalp_cu = {}
@@ -231,270 +233,6 @@ def get_1h_trend(symbol):
         return None, None
 
 # ============================================
-# TINH ENTRY THONG MINH - KHONG DUNG GIA HIEN TAI
-# ============================================
-def tinh_entry_thong_minh(df, signal_type):
-    """
-    Tinh entry dua tren phan tich ky thuat thuc te:
-    - Cau truc nen (pin bar low/high)
-    - MA20 (vung gia hoan lai trung binh)
-    - Volume Profile POC (vung volume cao nhat)
-    - 50% than nen truoc (vung gia an toan)
-    """
-    gia = df['close'].iloc[-1]
-    atr = df['ATR'].iloc[-1]
-    if pd.isna(atr): atr = gia * 0.002
-    
-    # Lay cac gia tri ky thuat
-    ma20 = df['MA20'].iloc[-1]
-    vol_poc = get_volume_profile(df, atr)
-    
-    # Phan tich nen truoc
-    o1, h1, l1, c1 = df['open'].iloc[-2], df['high'].iloc[-2], df['low'].iloc[-2], df['close'].iloc[-2]
-    o2, h2, l2, c2 = df['open'].iloc[-3], df['high'].iloc[-3], df['low'].iloc[-3], df['close'].iloc[-3]
-    
-    if signal_type == "LONG":
-        # LONG: Tim entry duoi gia hien tai (mua thap)
-        entry_options = []
-        
-        # 1. Day nen truoc (vung gia an toan sau khi dao chieu)
-        day_truoc = min(l1, l2)
-        entry_options.append(("Đáy nến trước", round(day_truoc, 2)))
-        
-        # 2. 50% than nen hien tai (vung gia trung binh cua nen dao chieu)
-        mid_body = (gia + o1) / 2 if signal_type == "LONG" else (gia + df['open'].iloc[-1]) / 2
-        entry_options.append(("50% thân nến", round(mid_body, 2)))
-        
-        # 3. MA20 (hoi ve duong trung binh)
-        if ma20 < gia:
-            entry_options.append(("MA20", round(ma20, 2)))
-        
-        # 4. Volume POC (vung volume cao nhat - noi thanh khoan tot)
-        if vol_poc < gia:
-            entry_options.append(("Vol POC", round(vol_poc, 2)))
-        
-        # 5. -0.5 ATR tu gia hien tai (entry an toan)
-        entry_atr = gia - atr * 0.5
-        entry_options.append(("-0.5 ATR", round(entry_atr, 2)))
-        
-        # Loc cac option duoi gia hien tai va lay option CAO NHAT (gan gia nhat)
-        valid_entries = [(name, price) for name, price in entry_options if price < gia * 0.998]
-        
-        if valid_entries:
-            entry_name, entry = max(valid_entries, key=lambda x: x[1])
-        else:
-            # Neu khong co option nao duoi gia, lay -0.3% gia hien tai
-            entry_name, entry = "Giá -0.3%", round(gia * 0.997, 2)
-    
-    else:  # SHORT
-        # SHORT: Tim entry tren gia hien tai (ban cao)
-        entry_options = []
-        
-        # 1. Dinh nen truoc
-        dinh_truoc = max(h1, h2)
-        entry_options.append(("Đỉnh nến trước", round(dinh_truoc, 2)))
-        
-        # 2. 50% than nen hien tai
-        mid_body = (gia + df['open'].iloc[-1]) / 2
-        entry_options.append(("50% thân nến", round(mid_body, 2)))
-        
-        # 3. MA20
-        if ma20 > gia:
-            entry_options.append(("MA20", round(ma20, 2)))
-        
-        # 4. Volume POC
-        if vol_poc > gia:
-            entry_options.append(("Vol POC", round(vol_poc, 2)))
-        
-        # 5. +0.5 ATR tu gia hien tai
-        entry_atr = gia + atr * 0.5
-        entry_options.append(("+0.5 ATR", round(entry_atr, 2)))
-        
-        # Loc cac option tren gia hien tai va lay option THAP NHAT (gan gia nhat)
-        valid_entries = [(name, price) for name, price in entry_options if price > gia * 1.002]
-        
-        if valid_entries:
-            entry_name, entry = min(valid_entries, key=lambda x: x[1])
-        else:
-            entry_name, entry = "Giá +0.3%", round(gia * 1.003, 2)
-    
-    return entry, entry_name
-
-# ============================================
-# SCALP 15M - PRICE ACTION + VOLUME PROFILE
-# ============================================
-def scalp_analysis(symbol):
-    try:
-        df = lay_nen(symbol, "15m", 100)
-        if df is None: return None
-        df = tinh_chi_bao(df)
-        
-        gia = df['close'].iloc[-1]
-        rsi = df['RSI'].iloc[-1]
-        bb_low = df['BB_low'].iloc[-1]
-        bb_high = df['BB_high'].iloc[-1]
-        bb_mid = df['BB_mid'].iloc[-1]
-        atr = df['ATR'].iloc[-1]
-        volr = df['Volume_Ratio'].iloc[-1]
-        adx = df['ADX'].iloc[-1]
-        ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
-        ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
-        
-        if pd.isna(rsi) or pd.isna(atr): return None
-        
-        trend_15m = "WEAK_BULLISH" if ema9 > ema21 else "WEAK_BEARISH"
-        pa_signals = detect_price_action(df)
-        vol_zone = get_volume_profile(df, atr)
-        
-        # === FILTER XU HUONG 1H ===
-        gia_1h, ema50_1h = get_1h_trend(symbol)
-        if gia_1h is None:
-            trend_1h = "KHONG_XAC_DINH"
-            allow_long = True
-            allow_short = True
-        else:
-            if gia_1h > ema50_1h:
-                trend_1h = "UPTREND"
-                allow_long = True
-                allow_short = False  # Khong SHORT khi 1h dang UPTREND
-            else:
-                trend_1h = "DOWNTREND"
-                allow_long = False  # Khong LONG khi 1h dang DOWNTREND
-                allow_short = True
-        
-        # === FILTER XU HUONG 15M - Khong trade nguoc trend 15m ===
-        if trend_15m == "WEAK_BEARISH":
-            allow_long = False  # Khong LONG khi 15m dang BEARISH
-        if trend_15m == "WEAK_BULLISH":
-            allow_short = False  # Khong SHORT khi 15m dang BULLISH
-        
-        # === LONG ===
-        long_signal = None
-        if allow_long and volr > 0.8:
-            # Dieu kien 1: RSI < 40 (goc)
-            if rsi < 40:
-                bullish_pa = [p for p in pa_signals if p[1] == "BULLISH"]
-                if bullish_pa:
-                    pa_name = bullish_pa[0][0]
-                    
-                    # === ENTRY THONG MINH ===
-                    entry, entry_name = tinh_entry_thong_minh(df, "LONG")
-                    
-                    sl = round(df['low'].iloc[-1] - atr * 0.3, 2)
-                    tp1 = round(bb_mid, 2)
-                    # Fix: TP2 phai > TP1
-                    tp2 = round(max(entry + atr * 2, tp1 + atr * 0.5), 2)
-                    
-                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
-                    
-                    if rsi < 25 and volr > 1.2: score, level = 3, "MẠNH"
-                    elif rsi < 30 and volr > 1.0: score, level = 2, "VỪA"
-                    else: score, level = 1, "YẾU"
-                    
-                    long_signal = {
-                        'signal': 'LONG', 'entry': entry, 'entry_pct': entry_pct,
-                        'entry_name': entry_name,
-                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
-                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend_15m, 'score': score, 'level': level,
-                        'pa_signal': pa_name, 'vol_zone': vol_zone,
-                        'filter_type': 'RSI', 'trend_1h': trend_1h
-                    }
-            
-            # Dieu kien 2 (MOI): PA manh + Vol cao, RSI 35-65
-            if long_signal is None and volr > 1.5:
-                strong_bullish = [p for p in pa_signals if p[1] == "BULLISH" and ("HAMMER" in p[0] or "ENGULFING" in p[0] or "MORNING" in p[0])]
-                if strong_bullish and 35 <= rsi <= 65:
-                    pa_name = strong_bullish[0][0]
-                    
-                    # === ENTRY THONG MINH ===
-                    entry, entry_name = tinh_entry_thong_minh(df, "LONG")
-                    
-                    sl = round(df['low'].iloc[-1] - atr * 0.3, 2)
-                    tp1 = round(bb_mid, 2)
-                    tp2 = round(max(entry + atr * 2, tp1 + atr * 0.5), 2)
-                    
-                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
-                    
-                    score, level = 2, "PA MẠNH"
-                    long_signal = {
-                        'signal': 'LONG', 'entry': entry, 'entry_pct': entry_pct,
-                        'entry_name': entry_name,
-                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
-                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend_15m, 'score': score, 'level': level,
-                        'pa_signal': pa_name, 'vol_zone': vol_zone,
-                        'filter_type': 'PA_STRONG', 'trend_1h': trend_1h
-                    }
-        
-        if long_signal: return long_signal
-        
-        # === SHORT ===
-        short_signal = None
-        if allow_short and volr > 0.8:
-            # Dieu kien 1: RSI > 60 (goc)
-            if rsi > 60:
-                bearish_pa = [p for p in pa_signals if p[1] == "BEARISH"]
-                if bearish_pa:
-                    pa_name = bearish_pa[0][0]
-                    
-                    # === ENTRY THONG MINH ===
-                    entry, entry_name = tinh_entry_thong_minh(df, "SHORT")
-                    
-                    sl = round(df['high'].iloc[-1] + atr * 0.3, 2)
-                    tp1 = round(bb_mid, 2)
-                    # Fix: TP2 phai < TP1
-                    tp2 = round(min(entry - atr * 2, tp1 - atr * 0.5), 2)
-                    
-                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
-                    
-                    if rsi > 75 and volr > 1.2: score, level = 3, "MẠNH"
-                    elif rsi > 70 and volr > 1.0: score, level = 2, "VỪA"
-                    else: score, level = 1, "YẾU"
-                    
-                    short_signal = {
-                        'signal': 'SHORT', 'entry': entry, 'entry_pct': entry_pct,
-                        'entry_name': entry_name,
-                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
-                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend_15m, 'score': score, 'level': level,
-                        'pa_signal': pa_name, 'vol_zone': vol_zone,
-                        'filter_type': 'RSI', 'trend_1h': trend_1h
-                    }
-            
-            # Dieu kien 2 (MOI): PA manh + Vol cao, RSI 35-65
-            if short_signal is None and volr > 1.5:
-                strong_bearish = [p for p in pa_signals if p[1] == "BEARISH" and ("SHOOTING" in p[0] or "ENGULFING" in p[0] or "EVENING" in p[0] or "GRAVESTONE" in p[0])]
-                if strong_bearish and 35 <= rsi <= 65:
-                    pa_name = strong_bearish[0][0]
-                    
-                    # === ENTRY THONG MINH ===
-                    entry, entry_name = tinh_entry_thong_minh(df, "SHORT")
-                    
-                    sl = round(df['high'].iloc[-1] + atr * 0.3, 2)
-                    tp1 = round(bb_mid, 2)
-                    tp2 = round(min(entry - atr * 2, tp1 - atr * 0.5), 2)
-                    
-                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
-                    
-                    score, level = 2, "PA MẠNH"
-                    short_signal = {
-                        'signal': 'SHORT', 'entry': entry, 'entry_pct': entry_pct,
-                        'entry_name': entry_name,
-                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
-                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
-                        'trend': trend_15m, 'score': score, 'level': level,
-                        'pa_signal': pa_name, 'vol_zone': vol_zone,
-                        'filter_type': 'PA_STRONG', 'trend_1h': trend_1h
-                    }
-        
-        if short_signal: return short_signal
-        
-        return None
-    except:
-        return None
-
-# ============================================
 # LAY DU LIEU NEN
 # ============================================
 def lay_nen(symbol, khung, limit=100):
@@ -546,26 +284,118 @@ def tinh_chi_bao(df):
     df['BB_low'] = df['BB_mid'] - 2*std
     df['BB_high'] = df['BB_mid'] + 2*std
     df['Volume_Ratio'] = df['volume'] / df['volume'].rolling(20).mean()
+    
+    # Fibonacci Levels
+    high_50 = df['high'].rolling(50).max()
+    low_50 = df['low'].rolling(50).min()
+    diff = high_50 - low_50
+    df['Fib_0'] = high_50
+    df['Fib_0.236'] = high_50 - 0.236 * diff
+    df['Fib_0.382'] = high_50 - 0.382 * diff
+    df['Fib_0.5'] = high_50 - 0.5 * diff
+    df['Fib_0.618'] = high_50 - 0.618 * diff
+    df['Fib_0.786'] = high_50 - 0.786 * diff
+    df['Fib_1'] = low_50
+    df['Fib_1.272'] = high_50 + 0.272 * diff
+    df['Fib_1.618'] = high_50 + 0.618 * diff
+    
     return df
 
 # ============================================
-# TIM SUPPORT & RESISTANCE
+# TIM SUPPORT & RESISTANCE - MULTI-TOUCH + CLUSTERING
 # ============================================
-def tim_support_resistance(df):
-    supports, resistances = [], []
-    for i in range(2, len(df)-2):
-        if df['high'].iloc[i] > df['high'].iloc[i-1] and df['high'].iloc[i] > df['high'].iloc[i-2] and df['high'].iloc[i] > df['high'].iloc[i+1] and df['high'].iloc[i] > df['high'].iloc[i+2]:
-            resistances.append(df['high'].iloc[i])
-        if df['low'].iloc[i] < df['low'].iloc[i-1] and df['low'].iloc[i] < df['low'].iloc[i-2] and df['low'].iloc[i] < df['low'].iloc[i+1] and df['low'].iloc[i] < df['low'].iloc[i+2]:
-            supports.append(df['low'].iloc[i])
-    def gom(levels, t=0.01):
+def tim_support_resistance(df, min_touches=2):
+    """
+    Tim S/R thuc te voi xac nhan multi-touch + clustering.
+    S luon < gia hien tai < R.
+    """
+    supports_raw, resistances_raw = [], []
+    
+    # B1: Tim swing highs/lows (fractal 3 nến)
+    for i in range(3, len(df)-3):
+        # Swing high: đỉnh cao hơn 3 nến trái và 3 nến phải
+        if (df['high'].iloc[i] > df['high'].iloc[i-1] and 
+            df['high'].iloc[i] > df['high'].iloc[i-2] and 
+            df['high'].iloc[i] > df['high'].iloc[i-3] and
+            df['high'].iloc[i] > df['high'].iloc[i+1] and 
+            df['high'].iloc[i] > df['high'].iloc[i+2] and 
+            df['high'].iloc[i] > df['high'].iloc[i+3]):
+            resistances_raw.append(df['high'].iloc[i])
+        
+        # Swing low: đáy thấp hơn 3 nến trái và 3 nến phải
+        if (df['low'].iloc[i] < df['low'].iloc[i-1] and 
+            df['low'].iloc[i] < df['low'].iloc[i-2] and 
+            df['low'].iloc[i] < df['low'].iloc[i-3] and
+            df['low'].iloc[i] < df['low'].iloc[i+1] and 
+            df['low'].iloc[i] < df['low'].iloc[i+2] and 
+            df['low'].iloc[i] < df['low'].iloc[i+3]):
+            supports_raw.append(df['low'].iloc[i])
+    
+    # B2: Gom cụm (clustering) các mức gần nhau trong phạm vi 0.5%
+    def cluster_levels(levels, threshold=0.005):
         if not levels: return []
-        levels = sorted(set(levels)); nhom = []; cur = [levels[0]]
-        for l in levels[1:]:
-            if (l-cur[-1])/cur[-1] < t: cur.append(l)
-            else: nhom.append(round(sum(cur)/len(cur),2)); cur = [l]
-        nhom.append(round(sum(cur)/len(cur),2)); return nhom
-    return sorted(gom(supports), reverse=True), sorted(gom(resistances))
+        levels = sorted(levels)
+        clusters = []
+        current_cluster = [levels[0]]
+        
+        for lvl in levels[1:]:
+            if (lvl - current_cluster[-1]) / current_cluster[-1] < threshold:
+                current_cluster.append(lvl)
+            else:
+                clusters.append(sum(current_cluster) / len(current_cluster))
+                current_cluster = [lvl]
+        clusters.append(sum(current_cluster) / len(current_cluster))
+        return [round(c, 2) for c in clusters]
+    
+    supports = cluster_levels(supports_raw)
+    resistances = cluster_levels(resistances_raw)
+    
+    gia = df['close'].iloc[-1]
+    
+    # B3: Lọc multi-touch: giữ cụm có ít nhất 2 swing chạm
+    def filter_multi_touch(levels, raw_levels, threshold=0.005):
+        result = []
+        for lvl in levels:
+            count = sum(1 for r in raw_levels if abs(r - lvl) / lvl < threshold)
+            if count >= min_touches:
+                result.append(lvl)
+        return result
+    
+    supports = filter_multi_touch(supports, supports_raw)
+    resistances = filter_multi_touch(resistances, resistances_raw)
+    
+    # B4: S < giá < R - ĐẢM BẢO ĐÚNG THỨ TỰ
+    supports_below = [s for s in supports if s < gia * 0.995]
+    resistances_above = [r for r in resistances if r > gia * 1.005]
+    
+    # Nếu không đủ S/R multi-touch, thêm MA20/MA50/EMA20/EMA50 làm S/R dự phòng
+    if len(supports_below) < 1:
+        ma20 = df['MA20'].iloc[-1]
+        ma50 = df['MA50'].iloc[-1]
+        ema20 = df['EMA20'].iloc[-1]
+        ema50 = df['EMA50'].iloc[-1]
+        fib_0382 = df['Fib_0.382'].iloc[-1]
+        fib_05 = df['Fib_0.5'].iloc[-1]
+        fib_0618 = df['Fib_0.618'].iloc[-1]
+        
+        backup = [x for x in [ma20, ma50, ema20, ema50, fib_0382, fib_05, fib_0618] 
+                  if not pd.isna(x) and x < gia * 0.995]
+        supports_below = sorted(backup, reverse=True)[:2]
+    
+    if len(resistances_above) < 1:
+        ma20 = df['MA20'].iloc[-1]
+        ma50 = df['MA50'].iloc[-1]
+        ema20 = df['EMA20'].iloc[-1]
+        ema50 = df['EMA50'].iloc[-1]
+        fib_1 = df['Fib_1'].iloc[-1]
+        fib_1_272 = df['Fib_1.272'].iloc[-1]
+        fib_1_618 = df['Fib_1.618'].iloc[-1]
+        
+        backup = [x for x in [ma20, ma50, ema20, ema50, fib_1, fib_1_272, fib_1_618] 
+                  if not pd.isna(x) and x > gia * 1.005]
+        resistances_above = sorted(backup)[:2]
+    
+    return sorted(supports_below, reverse=True), sorted(resistances_above)
 
 # ============================================
 # V16 - PHAN TICH MOT KHUNG + PRICE ACTION
@@ -610,60 +440,423 @@ def phan_tich_khung(df, ten_khung):
     return diemL, diemS, ly_do, gia, che_do, pa_signals
 
 # ============================================
-# V16 - TIM ENTRY + SL/TP
+# V16 - TIM ENTRY + SL/TP - R:R DAM BAO >= 1.5
 # ============================================
 def tinh_entry_sltp(df, signal_type, supports, resistances):
-    gia=df['close'].iloc[-1]; atr=df['ATR'].iloc[-1]
-    ma20=df['MA20'].iloc[-1]; ma50=df['MA50'].iloc[-1]
-    ema20=df['EMA20'].iloc[-1]; ema50=df['EMA50'].iloc[-1]
-    bb_low=df['BB_low'].iloc[-1]; bb_high=df['BB_high'].iloc[-1]
-    if pd.isna(atr): atr=gia*0.01
+    gia = df['close'].iloc[-1]
+    atr = df['ATR'].iloc[-1]
+    if pd.isna(atr): atr = gia * 0.01
+    
+    ma20 = df['MA20'].iloc[-1]
+    ma50 = df['MA50'].iloc[-1]
+    ema20 = df['EMA20'].iloc[-1]
+    ema50 = df['EMA50'].iloc[-1]
+    fib_0382 = df['Fib_0.382'].iloc[-1]
+    fib_0618 = df['Fib_0.618'].iloc[-1]
+    fib_1_272 = df['Fib_1.272'].iloc[-1]
+    fib_1_618 = df['Fib_1.618'].iloc[-1]
     
     vol_zone = get_volume_profile(df, atr)
     
-    if signal_type=="LONG":
-        cac_muc=[]
-        for s in supports[:3]:
-            if s<gia: cac_muc.append((f"S1",s)); break
-        if ma20<gia: cac_muc.append(("MA20",ma20))
-        if ma50<gia: cac_muc.append(("MA50",ma50))
-        if ema20<gia: cac_muc.append(("EMA20",ema20))
-        if bb_low<gia: cac_muc.append(("BB Low",bb_low))
-        if vol_zone<gia: cac_muc.append(("Vol Zone",vol_zone))
-        if cac_muc: entry_name,entry=max(cac_muc,key=lambda x:x[1])
-        else: entry_name,entry="Gia -1%",gia*0.99
+    if signal_type == "LONG":
+        # ENTRY: Hồi về vùng hỗ trợ GẦN NHẤT (ưu tiên multi-touch S/R)
+        entry_options = []
         
-        sl_atr=entry-atr*1.5; sl_support=None
-        for s in supports:
-            if s<entry*0.98: sl_support=s*0.995; break
-        sl=max(sl_atr,sl_support) if sl_support else sl_atr; sl=round(sl,2)
-        tp_atr=entry+atr*2; tp_resistance=None
-        for r in resistances:
-            if r>entry: tp_resistance=r*0.995; break
-        tp1=min(tp_atr,tp_resistance) if tp_resistance else tp_atr; tp1=round(tp1,2)
-        tp2=round(entry+atr*3,2); tp3=round(entry+atr*4,2)
-    else:
-        cac_muc=[]
+        # Ưu tiên 1: Support từ multi-touch
+        for s in supports[:2]:
+            if s < gia * 0.995:
+                entry_options.append((f"S {s:.2f}", s))
+        
+        # Ưu tiên 2: MA/EMA
+        for name, val in [("MA20", ma20), ("EMA20", ema20), ("MA50", ma50), ("EMA50", ema50)]:
+            if not pd.isna(val) and val < gia * 0.995:
+                entry_options.append((name, val))
+        
+        # Ưu tiên 3: Fibonacci retracement
+        for name, val in [("Fib 0.382", fib_0382), ("Fib 0.618", fib_0618)]:
+            if not pd.isna(val) and val < gia * 0.995:
+                entry_options.append((name, val))
+        
+        # Ưu tiên 4: Volume POC
+        if vol_zone < gia * 0.995:
+            entry_options.append(("Vol POC", vol_zone))
+        
+        if entry_options:
+            entry_name, entry = max(entry_options, key=lambda x: x[1])
+        else:
+            entry_name, entry = "MA20", round(ma20, 2) if not pd.isna(ma20) else round(gia * 0.98, 2)
+        
+        # SL: Dưới đáy gần nhất - 0.5 ATR (1D)
+        sl_support = min(supports) if supports else entry * 0.97
+        sl = round(min(sl_support, entry - atr * 1.5) - atr * 0.3, 2)
+        
+        # TP1: Vùng kháng cự THỰC SỰ gần nhất (xa nhất có thể)
+        tp1_options = []
         for r in resistances[:3]:
-            if r>gia: cac_muc.append((f"R1",r)); break
-        if ma20>gia: cac_muc.append(("MA20",ma20))
-        if ma50>gia: cac_muc.append(("MA50",ma50))
-        if ema20>gia: cac_muc.append(("EMA20",ema20))
-        if bb_high>gia: cac_muc.append(("BB High",bb_high))
-        if vol_zone>gia: cac_muc.append(("Vol Zone",vol_zone))
-        if cac_muc: entry_name,entry=min(cac_muc,key=lambda x:x[1])
-        else: entry_name,entry="Gia +1%",gia*1.01
+            if r > entry * 1.005:
+                tp1_options.append(r)
         
-        sl_atr=entry+atr*1.5; sl_resistance=None
-        for r in resistances:
-            if r>entry*1.02: sl_resistance=r*1.005; break
-        sl=min(sl_atr,sl_resistance) if sl_resistance else sl_atr; sl=round(sl,2)
-        tp_atr=entry-atr*2; tp_support=None
-        for s in supports:
-            if s<entry: tp_support=s*1.005; break
-        tp1=max(tp_atr,tp_support) if tp_support else tp_atr; tp1=round(tp1,2)
-        tp2=round(entry-atr*3,2); tp3=round(entry-atr*4,2)
+        if tp1_options:
+            tp1 = round(min(tp1_options), 2)
+        else:
+            # Dùng Fibonacci Extension nếu không có R
+            fib_targets = [x for x in [fib_1_272, fib_1_618] if not pd.isna(x) and x > entry * 1.005]
+            tp1 = round(min(fib_targets), 2) if fib_targets else round(entry + atr * 3, 2)
+        
+        # TP2: Fibonacci Extension 1.272
+        if not pd.isna(fib_1_272) and fib_1_272 > tp1:
+            tp2 = round(fib_1_272, 2)
+        else:
+            tp2 = round(entry + atr * 4, 2)
+        
+        # TP3: Fibonacci Extension 1.618
+        if not pd.isna(fib_1_618) and fib_1_618 > tp2:
+            tp3 = round(fib_1_618, 2)
+        else:
+            tp3 = round(entry + atr * 5, 2)
+    
+    else:  # SHORT
+        # ENTRY: Hồi về vùng kháng cự GẦN NHẤT
+        entry_options = []
+        
+        for r in resistances[:2]:
+            if r > gia * 1.005:
+                entry_options.append((f"R {r:.2f}", r))
+        
+        for name, val in [("MA20", ma20), ("EMA20", ema20), ("MA50", ma50), ("EMA50", ema50)]:
+            if not pd.isna(val) and val > gia * 1.005:
+                entry_options.append((name, val))
+        
+        for name, val in [("Fib 0.382", fib_0382), ("Fib 0.618", fib_0618)]:
+            if not pd.isna(val) and val > gia * 1.005:
+                entry_options.append((name, val))
+        
+        if vol_zone > gia * 1.005:
+            entry_options.append(("Vol POC", vol_zone))
+        
+        if entry_options:
+            entry_name, entry = min(entry_options, key=lambda x: x[1])
+        else:
+            entry_name, entry = "MA20", round(ma20, 2) if not pd.isna(ma20) else round(gia * 1.02, 2)
+        
+        # SL: Trên đỉnh gần nhất + 0.5 ATR
+        sl_resistance = max(resistances) if resistances else entry * 1.03
+        sl = round(max(sl_resistance, entry + atr * 1.5) + atr * 0.3, 2)
+        
+        # TP1: Vùng hỗ trợ THỰC SỰ gần nhất
+        tp1_options = []
+        for s in supports[:3]:
+            if s < entry * 0.995:
+                tp1_options.append(s)
+        
+        if tp1_options:
+            tp1 = round(max(tp1_options), 2)
+        else:
+            fib_targets = [x for x in [fib_0382, fib_0618] if not pd.isna(x) and x < entry * 0.995]
+            tp1 = round(max(fib_targets), 2) if fib_targets else round(entry - atr * 3, 2)
+        
+        # TP2
+        if not pd.isna(fib_0382) and fib_0382 < tp1:
+            tp2 = round(fib_0382, 2)
+        else:
+            tp2 = round(entry - atr * 4, 2)
+        
+        # TP3
+        if not pd.isna(fib_0618) and fib_0618 < tp2:
+            tp3 = round(fib_0618, 2)
+        else:
+            tp3 = round(entry - atr * 5, 2)
+    
+    # KIỂM TRA R:R - Nếu không đạt, điều chỉnh SL
+    risk = abs(entry - sl)
+    reward = abs(tp1 - entry)
+    rr = round(reward / risk, 1) if risk > 0 else 0
+    
+    if rr < RR_TOI_THIEU_V16:
+        # Điều chỉnh SL để đạt R:R tối thiểu
+        target_risk = reward / RR_TOI_THIEU_V16
+        if signal_type == "LONG":
+            sl = round(entry - target_risk, 2)
+        else:
+            sl = round(entry + target_risk, 2)
+        rr = RR_TOI_THIEU_V16
+    
     return entry, entry_name, sl, tp1, tp2, tp3
+
+# ============================================
+# TINH ENTRY THONG MINH CHO SCALP
+# ============================================
+def tinh_entry_thong_minh(df, signal_type):
+    """
+    Tinh entry cho Scalp dua tren:
+    - Cau truc nen (đáy/đỉnh nến trước)
+    - MA20/EMA20
+    - Volume Profile POC
+    - KHÔNG fallback về "Giá +0.3%"
+    """
+    gia = df['close'].iloc[-1]
+    atr = df['ATR'].iloc[-1]
+    if pd.isna(atr): atr = gia * 0.002
+    
+    ma20 = df['MA20'].iloc[-1]
+    ema20 = df['EMA20'].iloc[-1]
+    vol_poc = get_volume_profile(df, atr)
+    
+    o1, h1, l1, c1 = df['open'].iloc[-2], df['high'].iloc[-2], df['low'].iloc[-2], df['close'].iloc[-2]
+    o2, h2, l2, c2 = df['open'].iloc[-3], df['high'].iloc[-3], df['low'].iloc[-3], df['close'].iloc[-3]
+    
+    if signal_type == "LONG":
+        entry_options = []
+        
+        # 1. Đáy nến trước (vùng giá đã test)
+        day_truoc = min(l1, l2)
+        if day_truoc < gia * 0.995:
+            entry_options.append(("Đáy nến trước", round(day_truoc, 2)))
+        
+        # 2. MA20 nếu dưới giá
+        if not pd.isna(ma20) and ma20 < gia * 0.995:
+            entry_options.append(("MA20", round(ma20, 2)))
+        
+        # 3. EMA20
+        if not pd.isna(ema20) and ema20 < gia * 0.995:
+            entry_options.append(("EMA20", round(ema20, 2)))
+        
+        # 4. Volume POC
+        if vol_poc < gia * 0.995:
+            entry_options.append(("Vol POC", round(vol_poc, 2)))
+        
+        # 5. 50% thân nến hiện tại
+        mid_body = (gia + df['open'].iloc[-1]) / 2
+        if mid_body < gia * 0.995:
+            entry_options.append(("50% thân nến", round(mid_body, 2)))
+        
+        if entry_options:
+            entry_name, entry = max(entry_options, key=lambda x: x[1])
+        else:
+            # Nếu không có mức nào dưới giá, dùng MA20 làm entry mặc định
+            entry_name = "MA20"
+            entry = round(ma20, 2) if not pd.isna(ma20) else round(gia * 0.997, 2)
+    
+    else:  # SHORT
+        entry_options = []
+        
+        # 1. Đỉnh nến trước
+        dinh_truoc = max(h1, h2)
+        if dinh_truoc > gia * 1.005:
+            entry_options.append(("Đỉnh nến trước", round(dinh_truoc, 2)))
+        
+        # 2. MA20 nếu trên giá
+        if not pd.isna(ma20) and ma20 > gia * 1.005:
+            entry_options.append(("MA20", round(ma20, 2)))
+        
+        # 3. EMA20
+        if not pd.isna(ema20) and ema20 > gia * 1.005:
+            entry_options.append(("EMA20", round(ema20, 2)))
+        
+        # 4. Volume POC
+        if vol_poc > gia * 1.005:
+            entry_options.append(("Vol POC", round(vol_poc, 2)))
+        
+        # 5. 50% thân nến hiện tại
+        mid_body = (gia + df['open'].iloc[-1]) / 2
+        if mid_body > gia * 1.005:
+            entry_options.append(("50% thân nến", round(mid_body, 2)))
+        
+        if entry_options:
+            entry_name, entry = min(entry_options, key=lambda x: x[1])
+        else:
+            entry_name = "MA20"
+            entry = round(ma20, 2) if not pd.isna(ma20) else round(gia * 1.003, 2)
+    
+    return entry, entry_name
+
+# ============================================
+# SCALP 15M - PRICE ACTION + VOLUME PROFILE
+# ============================================
+def scalp_analysis(symbol):
+    try:
+        df = lay_nen(symbol, "15m", 100)
+        if df is None: return None
+        df = tinh_chi_bao(df)
+        
+        gia = df['close'].iloc[-1]
+        rsi = df['RSI'].iloc[-1]
+        bb_mid = df['BB_mid'].iloc[-1]
+        bb_high = df['BB_high'].iloc[-1]
+        bb_low = df['BB_low'].iloc[-1]
+        atr = df['ATR'].iloc[-1]
+        volr = df['Volume_Ratio'].iloc[-1]
+        adx = df['ADX'].iloc[-1]
+        ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
+        ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
+        
+        if pd.isna(rsi) or pd.isna(atr): return None
+        
+        trend_15m = "WEAK_BULLISH" if ema9 > ema21 else "WEAK_BEARISH"
+        pa_signals = detect_price_action(df)
+        vol_zone = get_volume_profile(df, atr)
+        supports, resistances = tim_support_resistance(df)
+        
+        # === FILTER XU HUONG 1H ===
+        gia_1h, ema50_1h = get_1h_trend(symbol)
+        if gia_1h is None:
+            trend_1h = "KHONG_XAC_DINH"
+            allow_long = True
+            allow_short = True
+        else:
+            if gia_1h > ema50_1h:
+                trend_1h = "UPTREND"
+                allow_long = True
+                allow_short = False
+            else:
+                trend_1h = "DOWNTREND"
+                allow_long = False
+                allow_short = True
+        
+        # === FILTER XU HUONG 15M ===
+        if trend_15m == "WEAK_BEARISH":
+            allow_long = False
+        if trend_15m == "WEAK_BULLISH":
+            allow_short = False
+        
+        def check_rr(entry, sl, tp):
+            risk = abs(entry - sl)
+            reward = abs(tp - entry)
+            return (round(reward / risk, 1) if risk > 0 else 0) >= RR_TOI_THIEU_SCALP
+        
+        # === LONG ===
+        long_signal = None
+        if allow_long and volr > 0.8:
+            if rsi < 40:
+                bullish_pa = [p for p in pa_signals if p[1] == "BULLISH"]
+                if bullish_pa:
+                    pa_name = bullish_pa[0][0]
+                    entry, entry_name = tinh_entry_thong_minh(df, "LONG")
+                    
+                    # SL: Dưới đáy nến tín hiệu - 0.3 ATR
+                    sl = round(df['low'].iloc[-1] - atr * 0.3, 2)
+                    
+                    # TP1: Vùng kháng cự gần nhất hoặc BB_mid (cái nào XA hơn)
+                    r_near = min(resistances) if resistances else entry + atr * 2
+                    tp1 = round(max(r_near, bb_mid, entry + atr * 1.5), 2)
+                    
+                    # TP2: ATR * 2.5 từ entry
+                    tp2 = round(entry + atr * 2.5, 2)
+                    
+                    # Kiểm tra R:R
+                    if not check_rr(entry, sl, tp1):
+                        sl = round(entry - abs(tp1 - entry) / RR_TOI_THIEU_SCALP, 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
+                    
+                    if rsi < 25 and volr > 1.2: score, level = 3, "MẠNH"
+                    elif rsi < 30 and volr > 1.0: score, level = 2, "VỪA"
+                    else: score, level = 1, "YẾU"
+                    
+                    long_signal = {
+                        'signal': 'LONG', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
+                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
+                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
+                        'trend': trend_15m, 'score': score, 'level': level,
+                        'pa_signal': pa_name, 'vol_zone': vol_zone,
+                        'filter_type': 'RSI', 'trend_1h': trend_1h
+                    }
+            
+            if long_signal is None and volr > 1.5:
+                strong_bullish = [p for p in pa_signals if p[1] == "BULLISH" and ("HAMMER" in p[0] or "ENGULFING" in p[0] or "MORNING" in p[0])]
+                if strong_bullish and 35 <= rsi <= 65:
+                    pa_name = strong_bullish[0][0]
+                    entry, entry_name = tinh_entry_thong_minh(df, "LONG")
+                    
+                    sl = round(df['low'].iloc[-1] - atr * 0.3, 2)
+                    r_near = min(resistances) if resistances else entry + atr * 2
+                    tp1 = round(max(r_near, bb_mid, entry + atr * 1.5), 2)
+                    tp2 = round(entry + atr * 2.5, 2)
+                    
+                    if not check_rr(entry, sl, tp1):
+                        sl = round(entry - abs(tp1 - entry) / RR_TOI_THIEU_SCALP, 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
+                    
+                    score, level = 2, "PA MẠNH"
+                    long_signal = {
+                        'signal': 'LONG', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
+                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
+                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
+                        'trend': trend_15m, 'score': score, 'level': level,
+                        'pa_signal': pa_name, 'vol_zone': vol_zone,
+                        'filter_type': 'PA_STRONG', 'trend_1h': trend_1h
+                    }
+        
+        if long_signal: return long_signal
+        
+        # === SHORT ===
+        short_signal = None
+        if allow_short and volr > 0.8:
+            if rsi > 60:
+                bearish_pa = [p for p in pa_signals if p[1] == "BEARISH"]
+                if bearish_pa:
+                    pa_name = bearish_pa[0][0]
+                    entry, entry_name = tinh_entry_thong_minh(df, "SHORT")
+                    
+                    sl = round(df['high'].iloc[-1] + atr * 0.3, 2)
+                    s_near = max(supports) if supports else entry - atr * 2
+                    tp1 = round(min(s_near, bb_mid, entry - atr * 1.5), 2)
+                    tp2 = round(entry - atr * 2.5, 2)
+                    
+                    if not check_rr(entry, sl, tp1):
+                        sl = round(entry + abs(tp1 - entry) / RR_TOI_THIEU_SCALP, 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
+                    
+                    if rsi > 75 and volr > 1.2: score, level = 3, "MẠNH"
+                    elif rsi > 70 and volr > 1.0: score, level = 2, "VỪA"
+                    else: score, level = 1, "YẾU"
+                    
+                    short_signal = {
+                        'signal': 'SHORT', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
+                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
+                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
+                        'trend': trend_15m, 'score': score, 'level': level,
+                        'pa_signal': pa_name, 'vol_zone': vol_zone,
+                        'filter_type': 'RSI', 'trend_1h': trend_1h
+                    }
+            
+            if short_signal is None and volr > 1.5:
+                strong_bearish = [p for p in pa_signals if p[1] == "BEARISH" and ("SHOOTING" in p[0] or "ENGULFING" in p[0] or "EVENING" in p[0] or "GRAVESTONE" in p[0])]
+                if strong_bearish and 35 <= rsi <= 65:
+                    pa_name = strong_bearish[0][0]
+                    entry, entry_name = tinh_entry_thong_minh(df, "SHORT")
+                    
+                    sl = round(df['high'].iloc[-1] + atr * 0.3, 2)
+                    s_near = max(supports) if supports else entry - atr * 2
+                    tp1 = round(min(s_near, bb_mid, entry - atr * 1.5), 2)
+                    tp2 = round(entry - atr * 2.5, 2)
+                    
+                    if not check_rr(entry, sl, tp1):
+                        sl = round(entry + abs(tp1 - entry) / RR_TOI_THIEU_SCALP, 2)
+                    
+                    entry_pct = round(abs(entry - gia) / gia * 100, 2)
+                    
+                    score, level = 2, "PA MẠNH"
+                    short_signal = {
+                        'signal': 'SHORT', 'entry': entry, 'entry_pct': entry_pct,
+                        'entry_name': entry_name,
+                        'sl': sl, 'tp1': tp1, 'tp2': tp2,
+                        'rsi': rsi, 'adx': adx, 'volr': volr, 'atr': atr,
+                        'trend': trend_15m, 'score': score, 'level': level,
+                        'pa_signal': pa_name, 'vol_zone': vol_zone,
+                        'filter_type': 'PA_STRONG', 'trend_1h': trend_1h
+                    }
+        
+        if short_signal: return short_signal
+        
+        return None
+    except:
+        return None
 
 # ============================================
 # MAIN
@@ -671,7 +864,7 @@ def tinh_entry_sltp(df, signal_type, supports, resistances):
 print("="*60)
 print(f"🤖 BOT PRO - V16 + SCALP + PRICE ACTION")
 print("="*60)
-gui("🤖 Bot PRO da khoi dong!\nV16: 1h+4h+1d + Price Action\nScalp: 15m + Entry thong minh + Filter trend\n📊 Tracker + Bao cao 12h")
+gui("🤖 Bot PRO da khoi dong!\nV16: 1h+4h+1d + S/R Multi-Touch + Fib\nScalp: 15m + Entry thong minh + R:R filter\n📊 Tracker + Bao cao 12h")
 
 lan=0
 while True:
@@ -679,7 +872,6 @@ while True:
         lan+=1
         now=datetime.now().strftime("%H:%M:%S")
         
-        # Clean old signals mỗi 12 vòng loop (1 tiếng)
         if lan % 12 == 0:
             clean_old_signals(tin_hieu_cu)
             clean_old_signals(scalp_cu)
