@@ -1,10 +1,10 @@
 """
-BOT TIN TUC PRO - NEWSAPI + GDELT (FREE)
-- NewsAPI: tin tài chính, kinh tế, địa chính trị (có key sẵn)
-- GDELT: địa chính trị, chiến tranh, khủng hoảng (không cần key)
-- Dịch tiếng Việt + Sentiment + Tác động thị trường
+BOT TIN TUC PRO - NEWSAPI + GDELT - FIXED
+- Block nguồn rác, blog cá nhân
+- Filter tài chính: chỉ tin liên quan thị trường toàn cầu
+- Fix sentiment: Bitcoin giảm → TIÊU CỰC
+- Dịch tiếng Việt + Sentiment
 - Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
-- MEMORY LOCK chống trùng - cập nhật mỗi 6 giờ
 """
 import requests
 import time
@@ -24,6 +24,45 @@ MAX_NEWS = 10
 DATA_DIR = "data"
 STATE_FILE = f"{DATA_DIR}/state_news.json"
 LOG_FILE = f"{DATA_DIR}/log_news.json"
+
+# ========== BLOCK NGUỒN RÁC ==========
+BLOCKED_SOURCES = [
+    'naturalnews.com', 'powerlineblog.com', 'slashdot.org',
+    'foxnews.com', 'breitbart.com', 'infowars.com', 'zerohedge.com',
+    'beforeitsnews.com', 'thegatewaypundit.com', 'dailycaller.com',
+]
+
+# ========== FILTER TÀI CHÍNH ==========
+FINANCE_KW = [
+    'crypto', 'bitcoin', 'ethereum', 'blockchain',
+    'stock', 'wall street', 'nasdaq', 'dow', 's&p', 'sp500',
+    'forex', 'dollar', 'euro', 'yen', 'yuan',
+    'bond', 'treasury', 'yield', 'interest rate', 'fed', 'fomc',
+    'inflation', 'cpi', 'ppi', 'gdp', 'recession', 'economy',
+    'oil', 'crude', 'gold', 'silver', 'commodity',
+    'etf', 'sec', 'cftc', 'regulation',
+    'market', 'trade', 'tariff', 'sanction',
+    'iran', 'israel', 'russia', 'ukraine', 'china', 'taiwan',
+    'missile', 'war', 'conflict', 'nuclear', 'military',
+    'ceasefire', 'truce', 'peace deal', 'peace talk',
+    'bank', 'central bank', 'imf', 'world bank',
+    'energy', 'oil price', 'crude oil',
+]
+
+ANALYSIS_KW = [
+    'analysis', 'opinion', 'essay', 'commentary', 'editorial',
+    'explainer', 'explained', 'guide to', 'how to',
+    'review', 'retrospect', 'podcast', 'episode',
+    '5 things', '3 reasons', 'top 10', 'top 5', 'weekly roundup',
+]
+
+NON_MARKET = [
+    "sports", "gaming", "movie", "netflix", "disney",
+    "grammy", "oscar", "emmy", "super bowl", "nfl", "nba",
+    "weather", "hurricane", "earthquake", "tsunami",
+    "cattle", "beef", "livestock", "celebrity", "royal family",
+    "beach", "erosion", "metal detecting",
+]
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -58,11 +97,10 @@ def clean_html(t):
     if not t: return ""
     t = unescape(t)
     t = re.sub(r'<[^>]+>', '', t)
-    t = re.sub(r'&[a-z]+;', '', t)
     return t.strip()
 
 def format_date(d):
-    for f in ["%Y-%m-%dT%H:%M:%SZ","%Y-%m-%dT%H:%M:%S%z","%a, %d %b %Y %H:%M:%S %z","%Y-%m-%dT%H:%M:%S%z"]:
+    for f in ["%Y-%m-%dT%H:%M:%SZ","%Y-%m-%dT%H:%M:%S%z","%a, %d %b %Y %H:%M:%S %z"]:
         try: return datetime.strptime(d, f).strftime("%d/%m/%Y %H:%M")
         except: pass
     return d[:16] if len(d)>16 else d
@@ -83,23 +121,22 @@ def econ_summary():
         if d: p.append(f.format(d[0]['value']))
     return " | ".join(p) if p else "Đang tải..."
 
-# ========== FILTER ==========
-ANALYSIS_KW = ['analysis','opinion','essay','commentary','editorial','explainer','explained','guide to','how to','review','retrospect','podcast','episode','listen now','subscribe','5 things','3 reasons','top 10','top 5','weekly roundup']
-
-NON_MARKET = ["sports","gaming","movie","netflix","disney","grammy","oscar","emmy","super bowl","nfl","nba","weather","hurricane","earthquake","tsunami","volcano","cattle","beef","livestock","celebrity","royal family","tiktok","influencer"]
-
 def is_hot_news(title, desc=""):
     t = (title+" "+desc).lower()
+    # Bỏ qua phân tích
     if any(kw in t for kw in ANALYSIS_KW): return False
+    # Bỏ qua tin không liên quan
     for kw in NON_MARKET:
         if kw in t: return False
+    # Phải có từ khóa tài chính
+    if not any(kw in t for kw in FINANCE_KW): return False
     return True
 
 # ========== SENTIMENT ==========
-POS_CTX = ["ceasefire","truce","peace deal","peace talk","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","gold decline","ending conflict","de-escalation"]
-NEG_CTX = ["missile strike","airstrike","invasion","rate hike","hawkish","tightening","recession","depression","crash","collapse","plunge","tumble","slump","etf outflow","sanction imposed","tariff imposed","nuclear threat","military escalation","stock crash","gold surge","declare war"]
-POS_KW = ["rate cut","dovish","easing","ceasefire","peace deal","peace talk","truce","withdrawal","bull market","rally","etf approved","etf inflow","blackrock","institutional","adoption","stimulus","rebound","recover","surge","soar"]
-NEG_KW = ["war","strike","missile","bomb","airstrike","attack","invasion","nuclear","sanction","embargo","tariff","trade war","rate hike","hawkish","tightening","recession","depression","crash","collapse","etf outflow","hormuz","escalation","conflict","tensions","plunge","tumble","slump"]
+POS_CTX = ["ceasefire","truce","peace deal","peace talk","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","gold decline","ending conflict"]
+NEG_CTX = ["missile strike","airstrike","invasion","rate hike","hawkish","tightening","recession","depression","crash","collapse","plunge","tumble","slump","etf outflow","sanction imposed","tariff imposed","nuclear threat","stock crash","gold surge","declare war","slide","drop","fall","decline","selloff"]
+POS_KW = ["rate cut","dovish","easing","ceasefire","peace deal","truce","rally","etf approved","etf inflow","institutional","adoption","surge","soar"]
+NEG_KW = ["war","strike","missile","attack","invasion","nuclear","sanction","tariff","rate hike","hawkish","tightening","recession","crash","collapse","plunge","tumble","slump","slide","drop","decline","selloff"]
 
 def has_kw(t,w): return bool(re.search(r'\b'+re.escape(w)+r'\b', t.lower()))
 
@@ -110,7 +147,7 @@ def analyze(title, desc=""):
     ps = pc*3+len(pk); ns = nc*3+len(nk)
     dk = [c for c in POS_CTX if c in t][:2] + [c for c in NEG_CTX if c in t][:2]
     if not dk: dk = pk[:2] if pk else nk[:2]
-    if not dk: dk = ["breaking"]
+    if not dk: dk = ["market news"]
     dk = list(set(dk))[:3]
     if ns>ps:
         l = "🔴🔴🔴 CỰC KỲ TIÊU CỰC" if ns>=9 else ("🔴🔴 RẤT TIÊU CỰC" if ns>=6 else "🔴 TIÊU CỰC")
@@ -120,7 +157,6 @@ def analyze(title, desc=""):
         g="🥇 Vàng: 🔴 GIẢM"; c="₿ Crypto: 🟢 TĂNG"; a="✅ LONG"
     return {'loai':l,'gold':g,'crypto':c,'advice':a,'keywords':dk}
 
-# ========== DỊCH ==========
 FIX_D = {"tỷ lệ cắt":"hạ lãi suất","tỷ lệ tăng":"tăng lãi suất","chợ bò":"thị trường tăng","chợ gấu":"thị trường giảm","tiền điện tử":"crypto","chuỗi khối":"blockchain","trú ẩn an toàn":"tài sản trú ẩn","cục dự trữ liên bang":"Fed","quỹ giao dịch trao đổi":"ETF","bảng lương phi nông nghiệp":"NFP","chỉ số giá tiêu dùng":"CPI","chỉ số giá sản xuất":"PPI","tổng sản phẩm quốc nội":"GDP","phố wall":"Phố Wall","nhà trắng":"Nhà Trắng","lầu năm góc":"Lầu Năm Góc","dầu thô":"dầu","giá dầu":"giá dầu"}
 
 def dich(text):
@@ -133,9 +169,7 @@ def dich(text):
     for w,c in FIX_D.items(): t = re.sub(r'\b'+re.escape(w)+r'\b', c, t, flags=re.IGNORECASE)
     return t[0].upper()+t[1:] if len(t)>1 else t
 
-# ============================================
-# 1. NEWSAPI - TIN TÀI CHÍNH + ĐỊA CHÍNH TRỊ
-# ============================================
+# ========== NEWSAPI ==========
 QUERIES = [
     "fed interest rate inflation",
     "stock market dow s&p",
@@ -150,7 +184,6 @@ QUERIES = [
 
 def fetch_newsapi(log):
     all_news = []
-    
     for query in QUERIES:
         try:
             r = requests.get("https://newsapi.org/v2/everything", params={
@@ -158,14 +191,16 @@ def fetch_newsapi(log):
                 'pageSize': 3, 'apiKey': NEWS_API_KEY
             }, timeout=10)
             if r.status_code != 200: continue
-            
             for article in r.json().get('articles', []):
                 title = article.get('title', '')
                 description = article.get('description', '') or ''
                 url = article.get('url', '')
                 published = article.get('publishedAt', '')
                 source_name = (article.get('source', {}) or {}).get('name', 'NewsAPI')
+                source_domain = source_name.lower().replace(' ', '')
                 
+                # Block nguồn rác
+                if any(b in source_domain for b in BLOCKED_SOURCES): continue
                 if not title or url in log['news_sent']: continue
                 if not is_hot_news(title, description): continue
                 
@@ -181,78 +216,58 @@ def fetch_newsapi(log):
                 })
             time.sleep(0.3)
         except: continue
-    
     return all_news
 
-# ============================================
-# 2. GDELT - ĐỊA CHÍNH TRỊ KHẨN CẤP
-# ============================================
+# ========== GDELT ==========
 GEO_QUERIES = ["iran israel war","russia ukraine attack","china taiwan military","north korea missile","middle east conflict"]
 
 def fetch_gdelt(log):
     all_news = []
-    
     for query in GEO_QUERIES:
         try:
             url = "https://api.gdeltproject.org/api/v2/doc/doc"
-            params = {
-                'query': query,
-                'mode': 'artlist',
-                'timespan': '24h',
-                'maxrecords': 5,
-                'format': 'json'
-            }
+            params = {'query': query, 'mode': 'artlist', 'timespan': '24h', 'maxrecords': 5, 'format': 'json'}
             r = requests.get(url, params=params, timeout=15)
             if r.status_code != 200: continue
-            
             data = r.json()
-            articles = data.get('articles', [])
-            
-            for article in articles[:5]:
+            for article in data.get('articles', [])[:5]:
                 title = article.get('title', '')
-                description = article.get('seendate', '')
                 url = article.get('url', '')
                 source_name = article.get('domain', 'GDELT')
+                source_domain = source_name.lower().replace(' ', '')
                 
+                if any(b in source_domain for b in BLOCKED_SOURCES): continue
                 if not title or url in log['news_sent']: continue
-                if not is_hot_news(title, description): continue
+                if not is_hot_news(title, ''): continue
                 
-                result = analyze(title, description)
+                result = analyze(title, '')
                 if not result: continue
                 
                 log['news_sent'].append(url)
                 all_news.append({
-                    'title_vi':dich(title),'title_en':title,'description':clean_html(description),
+                    'title_vi':dich(title),'title_en':title,'description':'',
                     'source':source_name,'date':format_date(article.get('seendate','')),
                     'loai':result['loai'],'gold':result['gold'],'crypto':result['crypto'],
                     'advice':result['advice'],'keywords':result['keywords']
                 })
             time.sleep(0.3)
         except: continue
-    
     return all_news
 
 def fetch_all_news():
     log = get_log(); log['news_sent'] = []
-    
     news_api = fetch_newsapi(log)
     news_gdelt = fetch_gdelt(log)
-    
     all_news = news_api + news_gdelt
     
-    # Xóa trùng lặp
     unique = []
-    seen_titles = []
+    seen = []
     for n in all_news:
-        title_words = set(n['title_en'].lower().split())
-        is_dup = False
-        for seen in seen_titles:
-            if seen and title_words and len(title_words & seen) / len(title_words | seen) > 0.5:
-                is_dup = True
-                break
-        if not is_dup:
-            seen_titles.append(title_words)
-            unique.append(n)
+        w = set(n['title_en'].lower().split())
+        dup = False
+        for s in seen:
+            if s and w and len(w & s) / len(w | s) > 0.5: dup = True; break
+        if not dup: seen.append(w); unique.append(n)
     
     log['news_sent'] = log['news_sent'][-500:]; save_log(log)
     pr = {'CỰC KỲ TIÊU CỰC':0,'RẤT TIÊU CỰC':1,'TIÊU CỰC':2,'TÍCH CỰC':3,'CỰC KỲ TÍCH CỰC':4}
@@ -313,8 +328,7 @@ def check_events():
                 d = fred_get(ev['fred'])
                 if d and len(d)>=2:
                     curr,prev = d[0]['value'],d[1]['value']
-                    if 'fomc' in ev['id']: kq = f"📈 <b>TĂNG</b>" if curr>prev else (f"📉 <b>GIẢM</b>" if curr<prev else f"➡️ <b>GIỮ NGUYÊN</b>")
-                    else: kq = f"📊 <b>{curr}</b>"
+                    kq = f"📈 <b>TĂNG</b>" if curr>prev else (f"📉 <b>GIẢM</b>" if curr<prev else f"➡️ <b>GIỮ NGUYÊN</b>")
                     log['events'][key]=time.time()
                     msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {ev['date']}\n📊 {kq}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}\n\n{now_str()}")
     save_log(log)
