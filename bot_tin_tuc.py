@@ -103,18 +103,13 @@ def econ_summary():
     return " | ".join(p) if p else "Đang tải..."
 
 # ========== FILTER ==========
-ANALYSIS_KW = [
+AANALYSIS_KW = [
     'analysis','opinion','essay','commentary','editorial','oped',
-    'what if','could','might','may lead to','potentially',
-    'explainer','explained','guide to','how to','why you should',
-    'review','retrospect','legacy','history of','looking back',
-    'here is why','here are','everything you need to know',
-    'what to expect','what we know','what happens next',
-    'why the','how the','when the','where the','who the',
-    'is this the end','can it','will it','should you',
-    'why ','how to ','when will ','where is ','what does ',
-    '5 things','3 reasons','top 10','top 5','weekly roundup',
+    'explainer','explained','guide to','how to',
+    'review','retrospect','legacy','history of',
+    'everything you need to know','weekly roundup',
     'podcast','episode','listen now','subscribe',
+    '5 things','3 reasons','top 10','top 5',
 ]
 
 NON_MARKET = [
