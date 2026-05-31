@@ -1,5 +1,5 @@
 """
-BOT TIN TUC PRO - 8 NGUON RSS + DEBUG
+BOT TIN TUC PRO - 8 NGUON RSS + DEBUG TITLE
 """
 import requests
 import time
@@ -89,26 +89,6 @@ def econ_summary():
     return " | ".join(p) if p else "Đang tải..."
 
 # ========== FILTER ==========
-FINANCE_KW = [
-    'crypto','bitcoin','ethereum','blockchain','defi',
-    'stock','wall street','nasdaq','dow','s&p','sp500','index','share',
-    'forex','dollar','euro','yen','yuan','pound','currency',
-    'bond','treasury','yield','interest rate','fed','fomc','central bank',
-    'inflation','cpi','ppi','gdp','recession','economy','economic',
-    'oil','crude','gold','silver','commodity','energy',
-    'etf','sec','cftc','regulation',
-    'market','trade','tariff','sanction','embargo','deal',
-    'bank','imf','world bank',
-    'iran','israel','russia','ukraine','china','taiwan','north korea',
-    'missile','war','conflict','military','nuclear','troops','strike','attack',
-    'pentagon','nato','white house','kremlin',
-    'peace talk','ceasefire','truce','negotiation','summit',
-    'supply chain','manufacturing','semiconductor','chip','ai',
-    'surge','soar','plunge','crash','rally','record',
-    'billion','million','deal','acquisition','merger','ipo',
-    'layoff','hiring','jobs','employment','unemployment',
-]
-
 ANALYSIS_KW = [
     'analysis','opinion','essay','commentary','editorial','oped',
     'what if','could','might','may lead to','potentially',
@@ -138,7 +118,7 @@ def is_hot_news(title, desc=""):
     if any(kw in t for kw in ANALYSIS_KW): return False
     for kw in NON_MARKET:
         if kw in t: return False
-    return True  # ← CHỈ CẦN KHÔNG VI PHẠM, KHÔNG CẦN CÓ FINANCE_KW
+    return True
 
 # ========== SENTIMENT + DICH ==========
 POS_CTX = ["ceasefire","truce","peace deal","peace talk","reopening","withdrawal","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","oil prices drop","stock surge","market rally","gold decline","ending conflict","de-escalation"]
@@ -194,7 +174,10 @@ def fetch_rss_news(log):
             items = root.findall('.//item') or root.findall('.//{http://www.w3.org/2005/Atom}entry')
             
             found = 0
-            for item in items[:10]:
+            sample_titles = []
+            blocked_reasons = []
+            
+            for idx, item in enumerate(items[:10]):
                 title_el = item.find('title') or item.find('{http://www.w3.org/2005/Atom}title')
                 title = title_el.text if title_el is not None else ''
                 desc_el = item.find('description') or item.find('{http://www.w3.org/2005/Atom}summary')
@@ -204,11 +187,27 @@ def fetch_rss_news(log):
                 date_el = item.find('pubDate') or item.find('{http://www.w3.org/2005/Atom}updated') or item.find('{http://www.w3.org/2005/Atom}published')
                 pubdate = date_el.text if date_el is not None else ''
                 
+                if idx < 2:
+                    sample_titles.append(title[:80])
+                
                 if not title or link in log['news_sent'] or link in all_links: continue
-                if not is_hot_news(title, desc): continue
+                
+                # Debug: check why blocked
+                t = (title+" "+desc).lower()
+                if any(kw in t for kw in ANALYSIS_KW):
+                    blocked_kw = [kw for kw in ANALYSIS_KW if kw in t][:2]
+                    if idx < 2: blocked_reasons.append(f"ANALYSIS: {blocked_kw}")
+                    continue
+                
+                blocked_nm = [kw for kw in NON_MARKET if kw in t]
+                if blocked_nm:
+                    if idx < 2: blocked_reasons.append(f"NON_MARKET: {blocked_nm}")
+                    continue
                 
                 result = analyze(title, desc)
-                if not result: continue
+                if not result:
+                    if idx < 2: blocked_reasons.append("NO_SENTIMENT")
+                    continue
                 
                 dup = False
                 for e in all_news:
@@ -225,11 +224,16 @@ def fetch_rss_news(log):
                     'usd':result['usd'],'advice':result['advice'],'keywords':result['keywords']
                 })
             
-            debug_msgs.append(f"✅ {src}: {len(items)} items → {found} hot")
+            debug_line = f"{'✅' if found>0 else '⚠️'} {src}: {len(items)} items → {found} hot"
+            if sample_titles:
+                debug_line += f"\n   📰 {sample_titles[0][:70]}"
+            if blocked_reasons:
+                debug_line += f"\n   🚫 {blocked_reasons[0]}"
+            debug_msgs.append(debug_line)
+            
         except Exception as e:
             debug_msgs.append(f"❌ {src}: {str(e)[:60]}")
     
-    # Gửi debug
     if debug_msgs:
         gui(f"🔍 <b>DEBUG RSS:</b>\n" + "\n".join(debug_msgs))
     
