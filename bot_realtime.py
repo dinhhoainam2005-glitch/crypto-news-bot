@@ -11,6 +11,8 @@ BOT REALTIME V2 - CMC + COINGLASS + COINGECKO + FRED
 - Sự kiện kinh tế: FOMC/CPI/NFP/GDP/PPI (FRED)
 - Địa chính trị khẩn cấp (NewsAPI)
 - Cập nhật Dominance mỗi giờ
+- SKIP 5 phút đầu khi khởi động - tránh spam
+- Hiển thị 3 múi giờ: Asia, EU, US
 """
 import requests
 import time
@@ -30,6 +32,7 @@ CMC_API_KEY = "ba07282bfe644708a9f42be12a33acf6"
 
 DATA_DIR = "data"
 LOG_FILE = f"{DATA_DIR}/log_realtime.json"
+SKIP_FIRST_MINUTES = 5  # Không gửi tín hiệu trong 5 phút đầu
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # ============================================
@@ -46,8 +49,14 @@ def gui(msg):
         pass
 
 def now_str():
+    """Hiển thị thời gian 3 múi giờ"""
     n = datetime.now()
-    return f"⏰ {n.strftime('%H:%M:%S')} | {n.strftime('%d/%m/%Y')}"
+    return (
+        f"🕐 {n.strftime('%H:%M')} (Asia) | "
+        f"{(n - timedelta(hours=5)).strftime('%H:%M')} (EU) | "
+        f"{(n - timedelta(hours=11)).strftime('%H:%M')} (US) | "
+        f"{n.strftime('%d/%m/%Y')}"
+    )
 
 def get_log():
     if os.path.exists(LOG_FILE):
@@ -425,7 +434,7 @@ def check_volume_alert():
     return None
 
 # ============================================
-# 6. TRENDING COINS - CMC (MỚI)
+# 6. TRENDING COINS - CMC
 # ============================================
 def check_trending():
     log = get_log()
@@ -461,7 +470,7 @@ def check_trending():
     return None
 
 # ============================================
-# 7. TOTAL MARKET CAP CHANGE - CMC (MỚI)
+# 7. TOTAL MARKET CAP CHANGE - CMC
 # ============================================
 def check_mcap_change():
     log = get_log()
@@ -672,7 +681,7 @@ def check_events():
                     f"📝 {ev['desc']}"
                     f"{fw_text}{tac_dong}{chien_luoc}\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
-                    f"📊 {econ_summary()}"
+                    f"📊 {econ_summary()}\n\n{now_str()}"
                 )
         
         elif days < 0 and 1 <= hours_since <= 24:
@@ -722,7 +731,7 @@ def check_events():
                         f"🎤 {tac_dong}\n"
                         f"💡 {hanh_dong}\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
-                        f"📊 {econ_summary()}"
+                        f"📊 {econ_summary()}\n\n{now_str()}"
                     )
     
     save_log(log)
@@ -772,7 +781,7 @@ def check_geo_emergency():
                         f"📡 {source}\n"
                         f"⚠️ Xung đột leo thang → 🔴 SHORT\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
-                        f"📊 {econ_summary()}"
+                        f"📊 {econ_summary()}\n\n{now_str()}"
                     )
             time.sleep(0.3)
         except:
@@ -786,7 +795,7 @@ print("=" * 60)
 print("BOT REALTIME V2 - CMC + COINGLASS + COINGECKO + FRED")
 print("=" * 60)
 
-# Gửi tin nhắn khởi động
+# Gửi tin nhắn khởi động - CHỈ 1 TIN DUY NHẤT
 dom_text = dominance_text()
 gui(
     f"🚨 <b>BOT REALTIME V2 ĐÃ KHỞI ĐỘNG!</b>\n"
@@ -794,7 +803,8 @@ gui(
     f"💰 Thanh lý >$100M | 📊 ETF >$300M | 📈 Biến động >3%\n"
     f"🚀 Top Gainers >20% | 📊 Volume >200%\n"
     f"🔥 Trending Coins | 💰 MCap Change >3%\n"
-    f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn{dom_text}\n"
+    f"🏦 FOMC/CPI/NFP/GDP | 🌍 Địa chính trị khẩn"
+    f"{dom_text}\n"
     f"━━━━━━━━━━━━━━━━━━\n{now_str()}"
 )
 
@@ -809,10 +819,16 @@ last_events = 0
 last_geo = 0
 last_dom = 0
 first_run = True
+startup_time = time.time()
 
 while True:
     try:
         now = time.time()
+        
+        # SKIP 5 PHÚT ĐẦU - tránh spam khi khởi động
+        if time.time() - startup_time < SKIP_FIRST_MINUTES * 60:
+            time.sleep(10)
+            continue
         
         # 1. Thanh lý - mỗi 60 giây
         if now - last_liq >= 60:
@@ -870,17 +886,17 @@ while True:
                 first_run = False
             else:
                 for msg in check_events():
-                    gui(f"{msg}\n\n{now_str()}")
+                    gui(f"{msg}")
         
         # 9. Địa chính trị - mỗi 10 phút
         if now - last_geo >= 600:
             last_geo = now
             msg = check_geo_emergency()
             if msg:
-                gui(f"{msg}\n\n{now_str()}")
+                gui(f"{msg}")
         
-        # 10. Cập nhật Dominance - mỗi giờ
-        if now - last_dom >= 3600:
+        # 10. Cập nhật Dominance - mỗi giờ (bắt đầu sau 1 giờ)
+        if now - last_dom >= 3600 and not first_run:
             last_dom = now
             dom = dominance_text()
             if dom:
