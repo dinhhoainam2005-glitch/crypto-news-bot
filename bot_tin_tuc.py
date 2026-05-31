@@ -1,12 +1,5 @@
 """
-BOT TIN TUC PRO - 8 NGUON RSS CHUAN + HOT NEWS FILTER
-- Reuters (Google News), Financial Times, Foreign Policy
-- BBC World, CNN World, War on the Rocks
-- CoinDesk, Cointelegraph
-- FILTER: Chỉ HOT NEWS - sự kiện thực tế, không phân tích
-- Dịch tiếng Việt + Sentiment + Tác động thị trường
-- Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
-- MEMORY LOCK chống trùng - cập nhật mỗi 6 giờ
+BOT TIN TUC PRO - 8 NGUON RSS + DEBUG
 """
 import requests
 import time
@@ -40,7 +33,6 @@ RSS_FEEDS = [
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ========== TIỆN ÍCH ==========
 def get_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f: return json.load(f)
@@ -80,7 +72,6 @@ def format_date(d):
         except: pass
     return d[:16] if len(d)>16 else d
 
-# ========== FRED ==========
 def fred_get(sid):
     try:
         r = requests.get("https://api.stlouisfed.org/fred/series/observations",
@@ -92,12 +83,12 @@ def fred_get(sid):
 
 def econ_summary():
     p = []
-    for sid,f in [('DFF','<b>Lãi suất Fed:</b> {}%'),('CPIAUCSL','<b>CPI:</b> {}'),('UNRATE','<b>Thất nghiệp:</b> {}%'),('GDP','<b>GDP:</b> ${:,.0f}B'),('PPIACO','<b>PPI:</b> {}')]:
+    for sid,f in [('DFF','<b>LS Fed:</b> {}%'),('CPIAUCSL','<b>CPI:</b> {}'),('UNRATE','<b>TN:</b> {}%'),('GDP','<b>GDP:</b> ${:,.0f}B'),('PPIACO','<b>PPI:</b> {}')]:
         d = fred_get(sid)
         if d: p.append(f.format(d[0]['value']))
     return " | ".join(p) if p else "Đang tải..."
 
-# ========== FILTER HOT NEWS ==========
+# ========== FILTER ==========
 FINANCE_KW = [
     'crypto','bitcoin','ethereum','blockchain','defi',
     'stock','wall street','nasdaq','dow','s&p','sp500','index','share',
@@ -150,24 +141,9 @@ def is_hot_news(title, desc=""):
         if kw in t: return False
     return True
 
-# ========== SENTIMENT ==========
-POS_CTX = [
-    "ceasefire","truce","peace deal","peace talk","reopening","withdrawal",
-    "rate cut","dovish","easing","stimulus","rebound","recover",
-    "surge","soar","rally","record high","bull market",
-    "etf approved","etf inflow","institutional","adoption",
-    "oil prices drop","stock surge","market rally","gold decline",
-    "ending conflict","de-escalation","diplomatic solution",
-]
-NEG_CTX = [
-    "war intensifies","missile strike","airstrike","invasion",
-    "oil prices surge","rate hike","hawkish","tightening",
-    "recession","depression","crash","collapse","plunge","tumble","slump",
-    "etf outflow","sanction imposed","tariff imposed",
-    "nuclear threat","military escalation",
-    "stock crash","market crash","gold surge",
-    "troops deploy","mobilization","declare war",
-]
+# ========== SENTIMENT + DICH ==========
+POS_CTX = ["ceasefire","truce","peace deal","peace talk","reopening","withdrawal","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","oil prices drop","stock surge","market rally","gold decline","ending conflict","de-escalation"]
+NEG_CTX = ["war intensifies","missile strike","airstrike","invasion","oil prices surge","rate hike","hawkish","tightening","recession","depression","crash","collapse","plunge","tumble","slump","etf outflow","sanction imposed","tariff imposed","nuclear threat","military escalation","stock crash","market crash","gold surge","troops deploy","mobilization","declare war"]
 POS_KW = ["rate cut","dovish","easing","ceasefire","peace deal","peace talk","truce","withdrawal","bull market","rally","etf approved","etf inflow","blackrock","institutional","adoption","stimulus","rebound","recover","surge","soar"]
 NEG_KW = ["war","strike","missile","bomb","airstrike","attack","invasion","nuclear","sanction","embargo","tariff","trade war","rate hike","hawkish","tightening","recession","depression","crash","collapse","etf outflow","hormuz","escalation","conflict","tensions","plunge","tumble","slump"]
 
@@ -175,10 +151,8 @@ def has_kw(t,w): return bool(re.search(r'\b'+re.escape(w)+r'\b', t.lower()))
 
 def analyze(title, desc=""):
     t = (title+" "+desc).lower()
-    pc = sum(1 for c in POS_CTX if c in t)
-    nc = sum(1 for c in NEG_CTX if c in t)
-    pk = [k for k in POS_KW if has_kw(t,k)]
-    nk = [k for k in NEG_KW if has_kw(t,k)]
+    pc = sum(1 for c in POS_CTX if c in t); nc = sum(1 for c in NEG_CTX if c in t)
+    pk = [k for k in POS_KW if has_kw(t,k)]; nk = [k for k in NEG_KW if has_kw(t,k)]
     ps = pc*3+len(pk); ns = nc*3+len(nk)
     if ps==0 and ns==0: return None
     dk = [c for c in POS_CTX if c in t][:3] + [c for c in NEG_CTX if c in t][:3]
@@ -186,14 +160,13 @@ def analyze(title, desc=""):
     dk = list(set(dk))[:3]
     if ns>ps:
         l = "🔴🔴🔴 CỰC KỲ TIÊU CỰC" if ns>=9 else ("🔴🔴 RẤT TIÊU CỰC" if ns>=6 else "🔴 TIÊU CỰC")
-        g="🥇 Vàng: 🟢 TĂNG (trú ẩn)"; c="₿ Crypto: 🔴 GIẢM (risk-off)"; u="💵 USD: 🟢 TĂNG (trú ẩn)"; a="⚠️ ƯU TIÊN SHORT"
+        g="🥇 Vàng: 🟢 TĂNG"; c="₿ Crypto: 🔴 GIẢM"; u="💵 USD: 🟢 TĂNG"; a="⚠️ SHORT"
     else:
         l = "🟢🟢🟢 CỰC KỲ TÍCH CỰC" if ps>=9 else ("🟢🟢 TÍCH CỰC" if ps>=6 else "🟢 TÍCH CỰC")
-        g="🥇 Vàng: 🔴 GIẢM (risk-on)"; c="₿ Crypto: 🟢 TĂNG (risk-on)"; u="💵 USD: 🔴 GIẢM (risk-on)"; a="✅ ƯU TIÊN LONG"
+        g="🥇 Vàng: 🔴 GIẢM"; c="₿ Crypto: 🟢 TĂNG"; u="💵 USD: 🔴 GIẢM"; a="✅ LONG"
     return {'loai':l,'gold':g,'crypto':c,'usd':u,'advice':a,'keywords':dk}
 
-# ========== DỊCH ==========
-FIX_D = {"tỷ lệ cắt":"hạ lãi suất","tỷ lệ tăng":"tăng lãi suất","chợ bò":"thị trường tăng","chợ gấu":"thị trường giảm","tiền điện tử":"crypto","chuỗi khối":"blockchain","trú ẩn an toàn":"tài sản trú ẩn","eo biển hormuz":"eo biển Hormuz","cục dự trữ liên bang":"Fed","quỹ giao dịch trao đổi":"ETF","bảng lương phi nông nghiệp":"bảng lương NFP","chỉ số giá tiêu dùng":"CPI","chỉ số giá sản xuất":"PPI","tổng sản phẩm quốc nội":"GDP","phố wall":"Phố Wall","nhà trắng":"Nhà Trắng","lầu năm góc":"Lầu Năm Góc","điện kremlin":"Điện Kremlin","dầu thô":"dầu","giá dầu":"giá dầu"}
+FIX_D = {"tỷ lệ cắt":"hạ lãi suất","tỷ lệ tăng":"tăng lãi suất","chợ bò":"thị trường tăng","chợ gấu":"thị trường giảm","tiền điện tử":"crypto","chuỗi khối":"blockchain","trú ẩn an toàn":"tài sản trú ẩn","cục dự trữ liên bang":"Fed","quỹ giao dịch trao đổi":"ETF","bảng lương phi nông nghiệp":"NFP","chỉ số giá tiêu dùng":"CPI","chỉ số giá sản xuất":"PPI","tổng sản phẩm quốc nội":"GDP","phố wall":"Phố Wall","nhà trắng":"Nhà Trắng","lầu năm góc":"Lầu Năm Góc","dầu thô":"dầu","giá dầu":"giá dầu"}
 
 def dich(text):
     if not text: return ""
@@ -205,16 +178,23 @@ def dich(text):
     for w,c in FIX_D.items(): t = re.sub(r'\b'+re.escape(w)+r'\b', c, t, flags=re.IGNORECASE)
     return t[0].upper()+t[1:] if len(t)>1 else t
 
-# ========== FETCH RSS ==========
+# ========== FETCH RSS + DEBUG ==========
 def fetch_rss_news(log):
     all_news = []
     all_links = []
+    debug_msgs = []
+    
     for url, src in RSS_FEEDS:
         try:
             r = requests.get(url, timeout=15, headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-            if r.status_code!=200: continue
+            if r.status_code != 200:
+                debug_msgs.append(f"❌ {src}: HTTP {r.status_code}")
+                continue
+            
             root = ET.fromstring(r.content)
             items = root.findall('.//item') or root.findall('.//{http://www.w3.org/2005/Atom}entry')
+            
+            found = 0
             for item in items[:10]:
                 title_el = item.find('title') or item.find('{http://www.w3.org/2005/Atom}title')
                 title = title_el.text if title_el is not None else ''
@@ -224,18 +204,36 @@ def fetch_rss_news(log):
                 link = (link_el.get('href') or link_el.text or '') if link_el is not None else ''
                 date_el = item.find('pubDate') or item.find('{http://www.w3.org/2005/Atom}updated') or item.find('{http://www.w3.org/2005/Atom}published')
                 pubdate = date_el.text if date_el is not None else ''
+                
                 if not title or link in log['news_sent'] or link in all_links: continue
                 if not is_hot_news(title, desc): continue
+                
                 result = analyze(title, desc)
                 if not result: continue
+                
                 dup = False
                 for e in all_news:
                     w1=set(title.lower().split()); w2=set(e['title_en'].lower().split())
                     if w1 and w2 and len(w1&w2)/len(w1|w2)>0.5: dup=True; break
                 if dup: continue
+                
+                found += 1
                 log['news_sent'].append(link); all_links.append(link)
-                all_news.append({'title_vi':dich(title),'title_en':title,'description':desc,'source':src,'date':format_date(pubdate) if pubdate else '','loai':result['loai'],'gold':result['gold'],'crypto':result['crypto'],'usd':result['usd'],'advice':result['advice'],'keywords':result['keywords']})
-        except: continue
+                all_news.append({
+                    'title_vi':dich(title),'title_en':title,'description':desc,
+                    'source':src,'date':format_date(pubdate) if pubdate else '',
+                    'loai':result['loai'],'gold':result['gold'],'crypto':result['crypto'],
+                    'usd':result['usd'],'advice':result['advice'],'keywords':result['keywords']
+                })
+            
+            debug_msgs.append(f"✅ {src}: {len(items)} items → {found} hot")
+        except Exception as e:
+            debug_msgs.append(f"❌ {src}: {str(e)[:60]}")
+    
+    # Gửi debug
+    if debug_msgs:
+        gui(f"🔍 <b>DEBUG RSS:</b>\n" + "\n".join(debug_msgs))
+    
     return all_news
 
 def fetch_all_news():
@@ -248,31 +246,30 @@ def fetch_all_news():
 
 # ========== EVENTS ==========
 EVENTS = [
-    {'id':'nfp_may','name':'💼 Bảng lương NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Báo cáo việc làm Mỹ.','fred':'UNRATE','is_fomc':False,'advice':'NFP > dự đoán → 🟢 LONG\nNFP < dự đoán → 🔴 SHORT','gold':'NFP cao → Vàng GIẢM','crypto':'NFP cao → Crypto TĂNG','usd':'NFP cao → USD TĂNG'},
-    {'id':'cpi_may','name':'📊 CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Lạm phát Mỹ.','fred':'CPIAUCSL','is_fomc':False,'advice':'CPI thấp → 🟢 LONG\nCPI cao → 🔴 SHORT','gold':'CPI cao → Vàng TĂNG','crypto':'CPI cao → Crypto GIẢM','usd':'CPI cao → USD TĂNG'},
-    {'id':'ppi_may','name':'🏭 PPI (T5)','date':'2026-06-12','time':'19:30','impact':'🟡 TB','desc':'Giá sản xuất.','fred':'PPIACO','is_fomc':False},
-    {'id':'fomc_jun','name':'🏦 FOMC (T6)','date':'2026-06-18','time':'01:00','impact':'🔴 CAO - QUAN TRỌNG NHẤT','desc':'Quyết định lãi suất Fed.','fred':'DFF','is_fomc':True,'advice':'GIỮ NGUYÊN → 🟢 LONG\nTĂNG → 🔴 SHORT\nGIẢM → 🟢 LONG mạnh','gold':'Hawkish → Vàng GIẢM','crypto':'Hawkish → Crypto GIẢM','usd':'Hawkish → USD TĂNG'},
-    {'id':'gdp_q2','name':'📊 GDP Q2','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng Mỹ.','fred':'GDP','is_fomc':False,'advice':'GDP cao → 🟢 LONG','gold':'GDP cao → Vàng GIẢM','crypto':'GDP cao → Crypto TĂNG','usd':'GDP cao → USD TĂNG'},
-    {'id':'fomc_jul','name':'🏦 FOMC (T7)','date':'2026-07-30','time':'01:00','impact':'🔴 CAO','desc':'Lãi suất Fed.','fred':'DFF','is_fomc':True,'advice':'GIỮ NGUYÊN → 🟢 LONG\nTĂNG → 🔴 SHORT','gold':'Hawkish → Vàng GIẢM','crypto':'Hawkish → Crypto GIẢM','usd':'Hawkish → USD TĂNG'},
+    {'id':'nfp_may','name':'💼 NFP (T5)','date':'2026-06-05','time':'19:30','impact':'🔴 CAO','desc':'Việc làm Mỹ.','fred':'UNRATE','is_fomc':False,'advice':'NFP > dự đoán → 🟢 LONG','gold':'NFP cao → Vàng GIẢM','crypto':'NFP cao → Crypto TĂNG'},
+    {'id':'cpi_may','name':'📊 CPI (T5)','date':'2026-06-11','time':'19:30','impact':'🔴 CAO','desc':'Lạm phát.','fred':'CPIAUCSL','is_fomc':False,'advice':'CPI thấp → 🟢 LONG','gold':'CPI cao → Vàng TĂNG','crypto':'CPI cao → Crypto GIẢM'},
+    {'id':'ppi_may','name':'🏭 PPI (T5)','date':'2026-06-12','time':'19:30','impact':'🟡 TB','desc':'Giá SX.','fred':'PPIACO','is_fomc':False},
+    {'id':'fomc_jun','name':'🏦 FOMC (T6)','date':'2026-06-18','time':'01:00','impact':'🔴 CAO','desc':'Lãi suất Fed.','fred':'DFF','is_fomc':True,'advice':'GIỮ NGUYÊN→🟢 LONG\nTĂNG→🔴 SHORT','gold':'Hawkish→Vàng GIẢM','crypto':'Hawkish→Crypto GIẢM'},
+    {'id':'gdp_q2','name':'📊 GDP Q2','date':'2026-06-25','time':'19:30','impact':'🔴 CAO','desc':'Tăng trưởng.','fred':'GDP','is_fomc':False,'advice':'GDP cao→🟢 LONG'},
+    {'id':'fomc_jul','name':'🏦 FOMC (T7)','date':'2026-07-30','time':'01:00','impact':'🔴 CAO','desc':'Lãi suất Fed.','fred':'DFF','is_fomc':True,'advice':'GIỮ NGUYÊN→🟢 LONG'},
 ]
 
 def get_fedwatch():
     d = fred_get('DFF')
     if not d: return None
     cr = d[0]['value']
+    tr = f"➡️ <b>{cr}%</b>"
     if len(d)>=2:
         pr = d[1]['value']
-        if cr>pr: tr = f"📈 Lãi suất <b>TĂNG</b> ({pr}%→{cr}%)"
-        elif cr<pr: tr = f"📉 Lãi suất <b>GIẢM</b> ({pr}%→{cr}%)"
-        else: tr = f"➡️ Lãi suất <b>ỔN ĐỊNH</b> {cr}%"
-    else: tr = f"➡️ Lãi suất: <b>{cr}%</b>"
+        if cr>pr: tr = f"📈 <b>TĂNG</b> ({pr}%→{cr}%)"
+        elif cr<pr: tr = f"📉 <b>GIẢM</b> ({pr}%→{cr}%)"
+        else: tr = f"➡️ <b>ỔN ĐỊNH</b> {cr}%"
     cd = fred_get('CPIAUCSL')
+    prd = "➡️ GIỮ NGUYÊN"
     if cd and len(cd)>=2:
         ch = round((cd[0]['value']-cd[1]['value'])/cd[1]['value']*100,1)
-        if ch>0.3: prd = f"⚠️ CPI tăng <b>{ch}%</b> → Áp lực TĂNG"
-        elif ch<-0.3: prd = f"✅ CPI giảm <b>{abs(ch)}%</b> → Có thể GIẢM"
-        else: prd = f"➡️ CPI ổn định → GIỮ NGUYÊN"
-    else: prd = "➡️ Dự kiến GIỮ NGUYÊN"
+        if ch>0.3: prd = f"⚠️ CPI tăng {ch}% → TĂNG"
+        elif ch<-0.3: prd = f"✅ CPI giảm {abs(ch)}% → GIẢM"
     return {'current_rate':f"{cr}%",'trend':tr,'prediction':prd}
 
 def check_events():
@@ -289,15 +286,11 @@ def check_events():
                 log['events'][key]=time.time()
                 cd = f"⚠️ <b>HÔM NAY</b> {ev['time']}" if days==0 else f"📅 <b>NGÀY MAI</b> {ev['time']}" if days==1 else f"📅 Còn <b>{days} ngày</b> - {ev['date']}"
                 fwt = ""
-                if ev.get('is_fomc') and fw: fwt = f"\n\n📊 <b>PHÂN TÍCH (FRED):</b>\n{fw['trend']}\n{fw['prediction']}\n🏦 Hiện tại: {fw['current_rate']}"
+                if ev.get('is_fomc') and fw: fwt = f"\n\n📊 <b>FRED:</b>\n{fw['trend']}\n{fw['prediction']}\n🏦 {fw['current_rate']}"
                 td = ""
-                if ev.get('gold') or ev.get('crypto') or ev.get('usd'):
-                    td = "\n\n📊 <b>TÁC ĐỘNG:</b>\n"
-                    if ev.get('gold'): td+=f"🥇 Vàng: {ev['gold']}\n"
-                    if ev.get('crypto'): td+=f"₿ Crypto: {ev['crypto']}\n"
-                    if ev.get('usd'): td+=f"💵 USD: {ev['usd']}\n"
+                if ev.get('gold') or ev.get('crypto'): td = f"\n\n📊 <b>TÁC ĐỘNG:</b>\n🥇 {ev.get('gold','')}\n₿ {ev.get('crypto','')}"
                 cl = ""
-                if ev.get('advice'): cl = f"\n💡 <b>CHIẾN LƯỢC:</b>\n{ev['advice']}\n"
+                if ev.get('advice'): cl = f"\n💡 <b>CHIẾN LƯỢC:</b>\n{ev['advice']}"
                 msgs.append(f"📅 <b>{ev['name']}</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {cd}\n⚡ {ev['impact']}\n📝 {ev['desc']}{fwt}{td}{cl}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}\n\n{now_str()}")
         elif days<0 and 1<=hs<=24:
             key = f"post_{ev['id']}"
@@ -305,23 +298,16 @@ def check_events():
                 d = fred_get(ev['fred'])
                 if d and len(d)>=2:
                     curr,prev = d[0]['value'],d[1]['value']
-                    if 'fomc' in ev['id'] and 'minutes' not in ev['id']:
-                        if curr>prev: kq="📈 <b>Fed TĂNG</b>"; td="🦅 HAWKISH"; hd="🔴 SHORT"
-                        elif curr<prev: kq="📉 <b>Fed GIẢM</b>"; td="🕊️ DOVISH"; hd="🟢 LONG"
-                        else: kq="➡️ <b>Fed GIỮ NGUYÊN</b>"; td="➡️ TRUNG LẬP"; hd="🟢 Tích cực"
-                    elif ev['id']=='nfp_may': kq=f"📊 <b>TN: {curr}%</b>"; td="✅ Mạnh" if curr<prev else "⚠️ Yếu"; hd="🟢 LONG" if curr<prev else "🔴 SHORT"
-                    elif ev['id']=='cpi_may':
-                        pct=round((curr-prev)/prev*100,1); kq=f"📊 <b>CPI: {curr}</b> ({'+' if pct>0 else ''}{pct}%)"
-                        td="⚠️ Nóng" if curr>prev else "✅ Hạ nhiệt"; hd="🟢 LONG" if curr<=prev else "🔴 SHORT"
-                    else: kq=f"📊 <b>{curr}</b>"; td="Đã cập nhật"; hd="Theo dõi"
+                    if 'fomc' in ev['id']: kq = f"📈 <b>TĂNG</b>" if curr>prev else (f"📉 <b>GIẢM</b>" if curr<prev else f"➡️ <b>GIỮ NGUYÊN</b>")
+                    else: kq = f"📊 <b>{curr}</b>"
                     log['events'][key]=time.time()
-                    msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {ev['date']} {ev['time']}\n📊 {kq}\n🎤 {td}\n💡 {hd}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}\n\n{now_str()}")
+                    msgs.append(f"✅ <b>{ev['name']} - KẾT QUẢ</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {ev['date']}\n📊 {kq}\n━━━━━━━━━━━━━━━━━━\n📊 {econ_summary()}\n\n{now_str()}")
     save_log(log)
     return msgs
 
 # ========== MAIN ==========
 print("="*60)
-print("BOT TIN TUC PRO - 8 NGUON RSS")
+print("BOT TIN TUC PRO + DEBUG")
 print("="*60)
 _last_fetch = 0
 
