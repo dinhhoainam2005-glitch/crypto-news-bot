@@ -1,11 +1,12 @@
 """
-BOT TIN TUC V2 - RSS + FRED + EVENTS
+BOT TIN TUC V2 - RSS + FRED + EVENTS - FIX TRUNG LAP
 - 8 nguồn RSS: Reuters, CNBC, CoinDesk, Cointelegraph, MarketWatch, BBC, Financial Times
 - Sự kiện kinh tế: FRED API (FOMC, CPI, NFP, GDP, PPI)
 - Dịch tiếng Việt: Google Translate + từ điển tài chính
 - Context analysis: hiểu ngữ cảnh thị trường
 - Format sự kiện chuẩn: Tác động + Chiến lược + Hành động
 - FILTER HOT NEWS: chỉ tin nóng, không phân tích/opinion
+- FIX: Không gửi trùng tin, không gửi trùng sự kiện
 - Cập nhật mỗi 6 giờ
 """
 import requests
@@ -31,7 +32,7 @@ STATE_FILE = f"{DATA_DIR}/state_news.json"
 LOG_FILE = f"{DATA_DIR}/log_news.json"
 
 # ============================================
-# 8 NGUỒN RSS CHẤT LƯỢNG CAO
+# 8 NGUỒN RSS
 # ============================================
 RSS_FEEDS = [
     ("https://feeds.reuters.com/reuters/businessNews", "Reuters"),
@@ -62,9 +63,6 @@ NON_MARKET_KW = [
     "grammy", "oscar", "emmy", "super bowl", "world cup", "nfl", "nba"
 ]
 
-# ============================================
-# FILTER HOT NEWS
-# ============================================
 ANALYSIS_KW = [
     'analysis', 'opinion', 'essay', 'commentary', 'editorial',
     'what if', 'could', 'might', 'may lead to',
@@ -291,10 +289,12 @@ def dich_tieng_viet(text):
     return translated
 
 # ============================================
-# FETCH RSS
+# FETCH RSS - FIX TRÙNG TIN
 # ============================================
 def fetch_rss_news(log):
     all_news = []
+    all_links = []  # Track links để tránh trùng
+    
     for url, source_name in RSS_FEEDS:
         try:
             r = requests.get(url, timeout=10, headers={'User-Agent':'Mozilla/5.0'})
@@ -302,6 +302,7 @@ def fetch_rss_news(log):
             root = ET.fromstring(r.content)
             items = root.findall('.//item')
             if not items: items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+            
             for item in items[:5]:
                 title_el = item.find('title')
                 if title_el is None: title_el = item.find('{http://www.w3.org/2005/Atom}title')
@@ -322,12 +323,15 @@ def fetch_rss_news(log):
                     if date_el is None: date_el = item.find('{http://www.w3.org/2005/Atom}published')
                 pubdate = date_el.text if date_el is not None else ''
                 
-                if not title or link in log['news_sent']: continue
+                if not title: continue
+                if link and link in log['news_sent']: continue
+                if link and link in all_links: continue  # FIX: Tránh trùng trong cùng lần fetch
                 if not is_hot_news(title, description): continue
                 
                 result = analyze_sentiment(title, description)
                 if result is None: continue
                 
+                # Kiểm tra trùng tiêu đề
                 is_dup = False
                 for existing in all_news:
                     w1 = set(title.lower().split()); w2 = set(existing['title_en'].lower().split())
@@ -336,6 +340,7 @@ def fetch_rss_news(log):
                 if is_dup: continue
                 
                 log['news_sent'].append(link)
+                all_links.append(link)
                 all_news.append({
                     'title_vi':dich_tieng_viet(title),'title_en':title,'description':description,
                     'source':source_name,'date':format_date(pubdate) if pubdate else '',
@@ -372,14 +377,17 @@ EVENTS = [
 def check_events():
     log = get_log(); now = datetime.now(); today = now.date(); messages = []
     fedwatch = get_fedwatch_prediction()
+    
     for ev in EVENTS:
         evd = datetime.strptime(ev['date'],'%Y-%m-%d').date()
         evdt = datetime.strptime(ev['date']+' '+ev['time'],'%Y-%m-%d %H:%M')
         days = (evd - today).days
         hours_since = (now - evdt).total_seconds()/3600 if evdt < now else -1
+        
         if 0 <= days <= 5:
             key = f"pre_{ev['id']}"
-            if time.time() - log['events'].get(key,0) >= 21600:
+            # FIX: Chỉ gửi nếu chưa gửi trong 6h qua
+            if time.time() - log['events'].get(key, 0) >= 21600:
                 log['events'][key] = time.time()
                 cd = f"⚠️ <b>HÔM NAY</b> lúc {ev['time']} (giờ VN)" if days==0 else f"📅 <b>NGÀY MAI</b> lúc {ev['time']} (giờ VN)" if days==1 else f"📅 Còn <b>{days} ngày</b> - {ev['date']} lúc {ev['time']} (giờ VN)"
                 fw_text = ""
@@ -393,6 +401,7 @@ def check_events():
                 chien_luoc = ""
                 if ev.get('advice'): chien_luoc = f"\n💡 <b>CHIẾN LƯỢC:</b>\n{ev['advice']}\n"
                 messages.append(f"📅 <b>{ev['name']}</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {cd}\n⚡ Mức độ: {ev['impact']}\n📝 {ev['desc']}{fw_text}{tac_dong}{chien_luoc}\n━━━━━━━━━━━━━━━━━━\n📊 <b>DỮ LIỆU KINH TẾ HIỆN TẠI:</b>\n{econ_summary()}\n\n{now_str()}")
+        
         elif days < 0 and 1 <= hours_since <= 24:
             key = f"post_{ev['id']}"
             if key not in log['events']:
@@ -425,13 +434,23 @@ print("="*60)
 while True:
     try:
         state = get_state(); now_ts = time.time()
+        
+        # FIX: Tránh gửi 2 lần liên tiếp khi deploy
         if not state['started'] or (now_ts - state['last_update'] >= CHU_KY):
+            # Kiểm tra lần cuối gửi cách đây chưa đến 60 giây → bỏ qua
+            if state.get('last_update', 0) > 0 and now_ts - state['last_update'] < 60:
+                time.sleep(10)
+                continue
+            
             set_state(started=True, last_update=now_ts)
             if 'started_ever' not in state: set_state(started_ever=True)
+            
             news = fetch_all_news()
             label = "đã khởi động" if state.get('started_ever') else "cập nhật 6h"
             rss_count = sum(1 for n in news if n['source'] in ['Reuters','CNBC','CoinDesk','Cointelegraph','MarketWatch','BBC World','BBC Business','Financial Times'])
+            
             gui(f"📰 <b>BẢN TIN THỊ TRƯỜNG {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED: ✅ | RSS: ✅ {rss_count} tin từ 8 nguồn\n\n📊 <b>DỮ LIỆU KINH TẾ:</b>\n{econ_summary()}\n\n📋 Phát hiện <b>{len(news)} tin</b> quan trọng\n\n{now_str()}")
+            
             if news:
                 neg = sum(1 for n in news if 'TIÊU CỰC' in n['loai']); pos = sum(1 for n in news if 'TÍCH CỰC' in n['loai'])
                 total = len(news); neg_ratio = neg/total if total > 0 else 0
@@ -441,6 +460,7 @@ while True:
                 all_kw = []
                 for n in news: all_kw.extend(n['keywords'])
                 gui(f"📰 <b>TỔNG QUAN THỊ TRƯỜNG</b>\n━━━━━━━━━━━━━━━━━━\n🚨 Mức độ: <b>{level}</b>\n📊 Tiêu cực: {neg}/{total} | Tích cực: {pos}/{total}\n💡 {advice}\n\n🔑 Từ khóa: {', '.join(list(set(all_kw))[:6])}\n\n{now_str()}")
+                
                 for n in news:
                     date_line = f"\n📅 {n['date']}" if n['date'] else ""
                     tom_tat_parts = []
@@ -453,7 +473,9 @@ while True:
                     if tom_tat: msg += f"{tom_tat}\n\n"
                     msg += f"📡 Nguồn: {n['source']}{date_line}\n🇬🇧 {n['title_en']}\n\n🏦 <b>Dự báo:</b>\n{n['gold']}\n{n['crypto']}\n{n['usd']}\n\n💡 {n['advice']}\n\n{now_str()}"
                     gui(msg); time.sleep(1)
+            
             for msg in check_events(): gui(msg)
+        
         time.sleep(60)
     except KeyboardInterrupt: print("\n👋 Đã dừng Bot Tin Tức"); break
     except Exception as e: print(f"Lỗi: {e}"); time.sleep(30)
