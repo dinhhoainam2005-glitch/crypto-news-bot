@@ -35,7 +35,8 @@ def gui(msg):
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
                      data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
-    except: pass
+    except:
+        pass
 
 def now_str():
     n = datetime.now()
@@ -102,10 +103,12 @@ def tracker_check():
     
     for t in trades:
         status = t.get('status', 'PENDING')
-        if status in ['CLOSED_WIN', 'CLOSED_LOSS']: continue
+        if status in ['CLOSED_WIN', 'CLOSED_LOSS']:
+            continue
         
         price = _t_price(t['coin'])
-        if price is None: continue
+        if price is None:
+            continue
         
         signal = t['signal']
         entry = t['entry']
@@ -114,8 +117,10 @@ def tracker_check():
         
         if status == 'PENDING':
             hit_entry = False
-            if signal == 'LONG' and price <= entry: hit_entry = True
-            elif signal == 'SHORT' and price >= entry: hit_entry = True
+            if signal == 'LONG' and price <= entry:
+                hit_entry = True
+            elif signal == 'SHORT' and price >= entry:
+                hit_entry = True
             
             if hit_entry:
                 t['status'] = 'ACTIVE'
@@ -128,18 +133,26 @@ def tracker_check():
             hit = False
             if signal == 'LONG':
                 if price >= tp1:
-                    t['status'] = 'CLOSED_WIN'; t['exit_price'] = tp1
-                    t['pnl'] = round((tp1 - entry) / entry * 100, 2); hit = True
+                    t['status'] = 'CLOSED_WIN'
+                    t['exit_price'] = tp1
+                    t['pnl'] = round((tp1 - entry) / entry * 100, 2)
+                    hit = True
                 elif price <= sl:
-                    t['status'] = 'CLOSED_LOSS'; t['exit_price'] = sl
-                    t['pnl'] = round((sl - entry) / entry * 100, 2); hit = True
+                    t['status'] = 'CLOSED_LOSS'
+                    t['exit_price'] = sl
+                    t['pnl'] = round((sl - entry) / entry * 100, 2)
+                    hit = True
             else:
                 if price <= tp1:
-                    t['status'] = 'CLOSED_WIN'; t['exit_price'] = tp1
-                    t['pnl'] = round((entry - tp1) / entry * 100, 2); hit = True
+                    t['status'] = 'CLOSED_WIN'
+                    t['exit_price'] = tp1
+                    t['pnl'] = round((entry - tp1) / entry * 100, 2)
+                    hit = True
                 elif price >= sl:
-                    t['status'] = 'CLOSED_LOSS'; t['exit_price'] = sl
-                    t['pnl'] = round((entry - sl) / entry * 100, 2); hit = True
+                    t['status'] = 'CLOSED_LOSS'
+                    t['exit_price'] = sl
+                    t['pnl'] = round((entry - sl) / entry * 100, 2)
+                    hit = True
             
             if hit:
                 t['exit_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -149,17 +162,20 @@ def tracker_check():
                 result_text = "THẮNG" if t['status'] == 'CLOSED_WIN' else "THUA"
                 gui(f"{icon} <b>[V16] KẾT QUẢ: {result_text}</b> {emoji}\n━━━━━━━━━━━━━━━━\n📊 {t['coin']} {t['signal']}\n💰 Entry: <b>${entry:,.2f}</b>\n🎯 Thoát: <b>${t['exit_price']:,.2f}</b>\n📈 PnL: <b>{t['pnl']:+.2f}%</b>\n⏰ {t['exit_time']}")
     
-    if updated: _t_save(trades)
+    if updated:
+        _t_save(trades)
 
 def tracker_report():
     global _last_report
     now = time.time()
-    if now - _last_report < 43200: return
+    if now - _last_report < 43200:
+        return
     _last_report = now
     
     trades = _t_load()
     closed = [t for t in trades if t.get('status') in ['CLOSED_WIN', 'CLOSED_LOSS']]
-    if not closed: return
+    if not closed:
+        return
     
     wins = [t for t in closed if t['status'] == 'CLOSED_WIN']
     losses = [t for t in closed if t['status'] == 'CLOSED_LOSS']
@@ -187,8 +203,10 @@ def tracker_report():
         f"📊 <b>TỔNG:</b>\n✅ Thắng: <b>{len(wins)}</b> | ❌ Thua: <b>{len(losses)}</b>\n"
         f"📊 Win Rate: <b>{wr:.1f}%</b>\n💰 Tổng PnL: <b>{total_pnl:+.2f}%</b>"
     )
-    if pending: msg += f"\n\n⏳ <b>CHỜ KHỚP:</b> {len(pending)} lệnh"
-    if active: msg += f"\n📊 <b>ĐANG CHẠY:</b> {len(active)} lệnh"
+    if pending:
+        msg += f"\n\n⏳ <b>CHỜ KHỚP:</b> {len(pending)} lệnh"
+    if active:
+        msg += f"\n📊 <b>ĐANG CHẠY:</b> {len(active)} lệnh"
     gui(msg)
 
 # ============================================
@@ -204,17 +222,25 @@ def detect_price_action(df):
     
     lower_wick = min(o, c) - l
     if body > 0 and lower_wick > body * 2 and total_range > 0:
-        if (c - l) / total_range > 0.7: results.append(("HAMMER 🔨", "BULLISH"))
-    if c > o and c1 < o1 and o <= c1 and c >= o1: results.append(("BULLISH ENGULFING 🟢", "BULLISH"))
-    if c2 < o2 and body > 0 and abs(c1-o1) < body*0.5 and c > o and c > (o2+c2)/2: results.append(("MORNING STAR ⭐", "BULLISH"))
+        if (c - l) / total_range > 0.7:
+            results.append(("HAMMER 🔨", "BULLISH"))
+    if c > o and c1 < o1 and o <= c1 and c >= o1:
+        results.append(("BULLISH ENGULFING 🟢", "BULLISH"))
+    if c2 < o2 and body > 0 and abs(c1-o1) < body*0.5 and c > o and c > (o2+c2)/2:
+        results.append(("MORNING STAR ⭐", "BULLISH"))
     upper_wick = h - max(o, c)
     if body > 0 and upper_wick > body * 2 and total_range > 0:
-        if (h - c) / total_range > 0.7: results.append(("SHOOTING STAR 🌠", "BEARISH"))
-    if c < o and c1 > o1 and o >= c1 and c <= o1: results.append(("BEARISH ENGULFING 🔴", "BEARISH"))
-    if c2 > o2 and body > 0 and abs(c1-o1) < body*0.5 and c < o and c < (o2+c2)/2: results.append(("EVENING STAR ⭐", "BEARISH"))
+        if (h - c) / total_range > 0.7:
+            results.append(("SHOOTING STAR 🌠", "BEARISH"))
+    if c < o and c1 > o1 and o >= c1 and c <= o1:
+        results.append(("BEARISH ENGULFING 🔴", "BEARISH"))
+    if c2 > o2 and body > 0 and abs(c1-o1) < body*0.5 and c < o and c < (o2+c2)/2:
+        results.append(("EVENING STAR ⭐", "BEARISH"))
     if total_range > 0 and body / total_range < 0.1:
-        if l < min(l1, l2): results.append(("DRAGONFLY DOJI 🐉", "BULLISH"))
-        elif h > max(h1, h2): results.append(("GRAVESTONE DOJI 🪦", "BEARISH"))
+        if l < min(l1, l2):
+            results.append(("DRAGONFLY DOJI 🐉", "BULLISH"))
+        elif h > max(h1, h2):
+            results.append(("GRAVESTONE DOJI 🪦", "BEARISH"))
     return results
 
 def lay_nen(symbol, khung, limit=100):
@@ -228,9 +254,11 @@ def lay_nen(symbol, khung, limit=100):
             'close_time', 'quote_volume', 'trades',
             'taker_buy_base', 'taker_buy_quote', 'ignore'
         ])
-        for col in ['close', 'high', 'low', 'open', 'volume']: df[col] = df[col].astype(float)
+        for col in ['close', 'high', 'low', 'open', 'volume']:
+            df[col] = df[col].astype(float)
         return df
-    except: return None
+    except:
+        return None
 
 def tinh_chi_bao(df):
     delta = df['close'].diff()
@@ -248,8 +276,12 @@ def tinh_chi_bao(df):
     df['MACD_hist'] = df['MACD'] - df['MACD_signal']
     df['TR'] = np.maximum(df['high']-df['low'], np.maximum(abs(df['high']-df['close'].shift()), abs(df['low']-df['close'].shift())))
     df['ATR'] = df['TR'].rolling(14).mean()
-    pdm = df['high'].diff(); mdm = -df['low'].diff(); pdm[pdm<0]=0; mdm[mdm<0]=0
-    pdt = np.where(pdm>mdm, pdm, 0); mdt = np.where(mdm>pdm, mdm, 0)
+    pdm = df['high'].diff()
+    mdm = -df['low'].diff()
+    pdm[pdm<0] = 0
+    mdm[mdm<0] = 0
+    pdt = np.where(pdm>mdm, pdm, 0)
+    mdt = np.where(mdm>pdm, mdm, 0)
     a14 = df['TR'].rolling(14).mean()
     pdi = 100*(pd.Series(pdt).rolling(14).mean()/a14)
     mdi = 100*(pd.Series(mdt).rolling(14).mean()/a14)
@@ -275,7 +307,8 @@ def tim_sr_thuc_te(df, i, lookback=100):
     resistances = []
     start = max(0, i - lookback)
     for j in range(start + 3, i - 3):
-        if j >= len(df) - 3: break
+        if j >= len(df) - 3:
+            break
         if (df['low'].iloc[j] < df['low'].iloc[j-1] and df['low'].iloc[j] < df['low'].iloc[j-2] and
             df['low'].iloc[j] < df['low'].iloc[j+1] and df['low'].iloc[j] < df['low'].iloc[j+2]):
             supports.append(df['low'].iloc[j])
@@ -284,12 +317,15 @@ def tim_sr_thuc_te(df, i, lookback=100):
             resistances.append(df['high'].iloc[j])
     
     def cluster(levels, threshold=0.005):
-        if not levels: return []
+        if not levels:
+            return []
         levels = sorted(levels)
         clusters = [[levels[0]]]
         for l in levels[1:]:
-            if (l - clusters[-1][-1]) / clusters[-1][-1] < threshold: clusters[-1].append(l)
-            else: clusters.append([l])
+            if (l - clusters[-1][-1]) / clusters[-1][-1] < threshold:
+                clusters[-1].append(l)
+            else:
+                clusters.append([l])
         return [round(sum(c)/len(c), 2) for c in clusters if len(c) >= 2]
     return sorted(cluster(supports), reverse=True), sorted(cluster(resistances))
 
@@ -314,47 +350,83 @@ def cham_diem_khung(df, i):
     bb_upper = df['BB_upper'].iloc[i]
     pa_signals = detect_price_action(df)
     
-    if pd.isna(rsi) or pd.isna(adx): return 0, 0, "UNKNOWN", []
+    if pd.isna(rsi) or pd.isna(adx):
+        return 0, 0, "UNKNOWN", []
     
     che_do = "SIDEWAY" if adx < ADX_SIDEWAY else "TREND"
     diemL = diemS = 0
     ly_do = []
     
-    if rsi < 30: diemL += 3; ly_do.append(f"RSI={rsi:.0f} cực quá bán")
-    elif rsi < 40: diemL += 2; ly_do.append(f"RSI={rsi:.0f} quá bán")
-    elif rsi > 70: diemS += 3; ly_do.append(f"RSI={rsi:.0f} cực quá mua")
-    elif rsi > 60: diemS += 2; ly_do.append(f"RSI={rsi:.0f} quá mua")
+    if rsi < 30:
+        diemL += 3
+        ly_do.append(f"RSI={rsi:.0f} cực quá bán")
+    elif rsi < 40:
+        diemL += 2
+        ly_do.append(f"RSI={rsi:.0f} quá bán")
+    elif rsi > 70:
+        diemS += 3
+        ly_do.append(f"RSI={rsi:.0f} cực quá mua")
+    elif rsi > 60:
+        diemS += 2
+        ly_do.append(f"RSI={rsi:.0f} quá mua")
     
     if adx > 25:
-        if di_plus > di_minus: diemL += 3; ly_do.append("Trend tăng")
-        else: diemS += 3; ly_do.append("Trend giảm")
+        if di_plus > di_minus:
+            diemL += 3
+            ly_do.append("Trend tăng")
+        else:
+            diemS += 3
+            ly_do.append("Trend giảm")
     
     if not pd.isna(ma20) and not pd.isna(ma50) and ma50 > 0:
         if abs(ma20 - ma50) / ma50 > 0.01:
-            if ma20 > ma50: diemL += 2; ly_do.append("MA20>MA50")
-            else: diemS += 2; ly_do.append("MA50>MA20")
+            if ma20 > ma50:
+                diemL += 2
+                ly_do.append("MA20>MA50")
+            else:
+                diemS += 2
+                ly_do.append("MA50>MA20")
     
     if not pd.isna(macd_hist) and not pd.isna(macd_hist_prev):
-        if macd_hist > 0 and macd_hist_prev <= 0: diemL += 3; ly_do.append("MACD cắt lên")
-        elif macd_hist > 0 and macd_hist > macd_hist_prev: diemL += 2
-        if macd_hist < 0 and macd_hist_prev >= 0: diemS += 3; ly_do.append("MACD cắt xuống")
-        elif macd_hist < 0 and macd_hist < macd_hist_prev: diemS += 2
+        if macd_hist > 0 and macd_hist_prev <= 0:
+            diemL += 3
+            ly_do.append("MACD cắt lên")
+        elif macd_hist > 0 and macd_hist > macd_hist_prev:
+            diemL += 2
+        if macd_hist < 0 and macd_hist_prev >= 0:
+            diemS += 3
+            ly_do.append("MACD cắt xuống")
+        elif macd_hist < 0 and macd_hist < macd_hist_prev:
+            diemS += 2
     
     if not pd.isna(stoch_k) and not pd.isna(stoch_d):
-        if stoch_k < 20 and stoch_k > stoch_d: diemL += 2; ly_do.append(f"Stoch={stoch_k:.0f}")
-        elif stoch_k > 80 and stoch_k < stoch_d: diemS += 2
+        if stoch_k < 20 and stoch_k > stoch_d:
+            diemL += 2
+            ly_do.append(f"Stoch={stoch_k:.0f}")
+        elif stoch_k > 80 and stoch_k < stoch_d:
+            diemS += 2
     
     if not pd.isna(volr) and volr > 1.5:
-        if gia > gia_prev: diemL += 2; ly_do.append(f"Vol x{volr:.1f}")
-        else: diemS += 2; ly_do.append(f"Vol x{volr:.1f}")
+        if gia > gia_prev:
+            diemL += 2
+            ly_do.append(f"Vol x{volr:.1f}")
+        else:
+            diemS += 2
+            ly_do.append(f"Vol x{volr:.1f}")
     
-    if not pd.isna(bb_lower) and gia <= bb_lower * 1.01: diemL += 1
-    if not pd.isna(bb_upper) and gia >= bb_upper * 0.99: diemS += 1
+    if not pd.isna(bb_lower) and gia <= bb_lower * 1.01:
+        diemL += 1
+    if not pd.isna(bb_upper) and gia >= bb_upper * 0.99:
+        diemS += 1
     
     bullish_pa = [p for p in pa_signals if p[1] == "BULLISH"]
     bearish_pa = [p for p in pa_signals if p[1] == "BEARISH"]
-    if bullish_pa: diemL += 2; ly_do.append(f"PA: {bullish_pa[0][0]}")
-    if bearish_pa: diemS += 2; ly_do.append(f"PA: {bearish_pa[0][0]}")
+    if bullish_pa:
+        diemL += 2
+        ly_do.append(f"PA: {bullish_pa[0][0]}")
+    if bearish_pa:
+        diemS += 2
+        ly_do.append(f"PA: {bearish_pa[0][0]}")
     
     ly_do.append(f"ADX={adx:.0f} ({che_do})")
     return diemL, diemS, che_do, ly_do
@@ -366,27 +438,32 @@ def tinh_entry_sltp_sr(df, signal, i):
     supports, resistances = tim_sr_thuc_te(df, i)
     gia = df['close'].iloc[i]
     atr = df['ATR'].iloc[i]
-    if pd.isna(atr): atr = gia * 0.01
+    if pd.isna(atr):
+        atr = gia * 0.01
     
     if signal == "LONG":
         valid_s = [s for s in supports if s < gia * 0.998]
-        if not valid_s: return None
+        if not valid_s:
+            return None
         entry = max(valid_s)
         entry_name = f"S/R {entry:.2f}"
         sl = round(entry * 0.997, 2)
         valid_r = [r for r in resistances if r > entry * 1.005]
-        if not valid_r: return None
+        if not valid_r:
+            return None
         tp1 = min(valid_r)
         tp2 = round(entry + atr * 4, 2)
         tp3 = round(entry + atr * 6, 2)
     else:
         valid_r = [r for r in resistances if r > gia * 1.002]
-        if not valid_r: return None
+        if not valid_r:
+            return None
         entry = min(valid_r)
         entry_name = f"S/R {entry:.2f}"
         sl = round(entry * 1.003, 2)
         valid_s = [s for s in supports if s < entry * 0.995]
-        if not valid_s: return None
+        if not valid_s:
+            return None
         tp1 = max(valid_s)
         tp2 = round(entry - atr * 4, 2)
         tp3 = round(entry - atr * 6, 2)
@@ -407,51 +484,62 @@ lan = 0
 while True:
     try:
         lan += 1
-        if lan % 12 == 0: clean_old_signals(tin_hieu_cu)
+        if lan % 12 == 0:
+            clean_old_signals(tin_hieu_cu)
         
         for COIN in DANH_SACH_COIN:
             df_1h = lay_nen(COIN, "1h", 100)
-            if df_1h is None: continue
+            if df_1h is None:
+                continue
             
             df_1h = tinh_chi_bao(df_1h)
             i = len(df_1h) - 1
             
             # ADX filter
             adx_1h = df_1h['ADX'].iloc[i]
-            if pd.isna(adx_1h) or adx_1h < ADX_MIN: continue
+            if pd.isna(adx_1h) or adx_1h < ADX_MIN:
+                continue
             
-            # Cooldown check
+            # Cooldown check - 8 gio
             if COIN in last_signal_time:
                 last_time = datetime.fromisoformat(last_signal_time[COIN])
                 hours_since = (datetime.now() - last_time).total_seconds() / 3600
-                if hours_since < 8: continue
+                if hours_since < 8:
+                    continue
             
-            # Max concurrent check
+            # Max concurrent check - toi da 2 lenh
             trades = _t_load()
             active_count = len([t for t in trades if t.get('status') in ['PENDING', 'ACTIVE']])
-            if active_count >= 2: continue
+            if active_count >= 2:
+                continue
             
             # Cham diem
             diemL, diemS, che_do, ly_do = cham_diem_khung(df_1h, i)
             threshold = NGUONG_DIEM_TREND if che_do == "TREND" else NGUONG_DIEM_SIDEWAY
             
             signal = "NEUTRAL"
-            if diemL >= threshold and diemL > diemS: signal = "LONG"
-            elif diemS >= threshold and diemS > diemL: signal = "SHORT"
+            if diemL >= threshold and diemL > diemS:
+                signal = "LONG"
+            elif diemS >= threshold and diemS > diemL:
+                signal = "SHORT"
             
-            if COIN not in tin_hieu_cu: tin_hieu_cu[COIN] = None
-            if signal == "NEUTRAL" or signal == tin_hieu_cu[COIN]: continue
+            if COIN not in tin_hieu_cu:
+                tin_hieu_cu[COIN] = None
+            if signal == "NEUTRAL" or signal == tin_hieu_cu[COIN]:
+                continue
             
             # Tinh Entry/SL/TP
             result = tinh_entry_sltp_sr(df_1h, signal, i)
-            if result is None: continue
+            if result is None:
+                continue
             
             entry, entry_name, sl, tp1, tp2, tp3 = result
             
             risk = abs(entry - sl)
             reward = abs(tp1 - entry)
             rr_val = round(reward / risk, 1) if risk > 0 else 0
-            if rr_val < RR_MIN: continue
+            if rr_val < RR_MIN:
+                continue
             
             gia_hien_tai = df_1h['close'].iloc[i]
             ten_coin = COIN.replace("USDT", "")
@@ -466,7 +554,8 @@ while True:
             supports_1h, resistances_1h = tim_sr_thuc_te(df_1h, i)
             pa_1h = detect_price_action(df_1h)
             pa_text = ""
-            if pa_1h: pa_text = f"\n📊 <b>Price Action:</b> <b>{pa_1h[0][0]}</b>"
+            if pa_1h:
+                pa_text = f"\n📊 <b>Price Action:</b> <b>{pa_1h[0][0]}</b>"
             
             msg = (
                 f"🔮 {ten_coin} 🏦 TÍN HIỆU V16 {signal} {'🟢' if signal=='LONG' else '🔴'}\n"
@@ -479,10 +568,14 @@ while True:
                 f"📈 <b>RSI:</b> {rsi_val:.1f} | <b>ADX:</b> {adx_val:.1f} | <b>Vol:</b> {volr_val:.1f}x\n"
                 f"🛡️ <b>S/R 1h:</b> "
             )
-            if resistances_1h: msg += f"R1=${resistances_1h[0]:,.2f}"
-            if len(resistances_1h) > 1: msg += f", R2=${resistances_1h[1]:,.2f}"
-            if supports_1h: msg += f" | S1=${supports_1h[0]:,.2f}"
-            if len(supports_1h) > 1: msg += f", S2=${supports_1h[1]:,.2f}"
+            if resistances_1h:
+                msg += f"R1=${resistances_1h[0]:,.2f}"
+            if len(resistances_1h) > 1:
+                msg += f", R2=${resistances_1h[1]:,.2f}"
+            if supports_1h:
+                msg += f" | S1=${supports_1h[0]:,.2f}"
+            if len(supports_1h) > 1:
+                msg += f", S2=${supports_1h[1]:,.2f}"
             
             msg += (
                 f"\n\n💡 <b>ĐẶT LỆNH CHỜ:</b>\n"
