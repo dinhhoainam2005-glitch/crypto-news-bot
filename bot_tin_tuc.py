@@ -27,7 +27,6 @@ DATA_DIR = "data"
 STATE_FILE = f"{DATA_DIR}/state_news.json"
 LOG_FILE = f"{DATA_DIR}/log_news.json"
 
-# ========== NGUỒN UY TÍN ==========
 TRUSTED_SOURCES = [
     'reuters', 'bloomberg', 'cnbc', 'wall street journal', 'financial times',
     'coindesk', 'cointelegraph', 'bbc', 'cnn', 'associated press',
@@ -36,7 +35,6 @@ TRUSTED_SOURCES = [
     'decrypt', 'the block', 'blockworks', 'crypto briefing',
 ]
 
-# ========== BLOCK NGUỒN YẾU ==========
 BLOCKED_SOURCES = [
     'naturalnews.com', 'powerlineblog.com', 'slashdot.org',
     'foxnews.com', 'breitbart.com', 'infowars.com', 'zerohedge.com',
