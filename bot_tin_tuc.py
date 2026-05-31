@@ -1,12 +1,11 @@
 """
-BOT TIN TUC V2 - RSS + FRED + EVENTS - FIX TRUNG LAP
+BOT TIN TUC V2 - RSS + FRED + EVENTS - FINAL
 - 8 nguồn RSS: Reuters, CNBC, CoinDesk, Cointelegraph, MarketWatch, BBC, Financial Times
 - Sự kiện kinh tế: FRED API (FOMC, CPI, NFP, GDP, PPI)
 - Dịch tiếng Việt: Google Translate + từ điển tài chính
 - Context analysis: hiểu ngữ cảnh thị trường
-- Format sự kiện chuẩn: Tác động + Chiến lược + Hành động
 - FILTER HOT NEWS: chỉ tin nóng, không phân tích/opinion
-- FIX: Không gửi trùng tin, không gửi trùng sự kiện
+- FIX TRIỆT ĐỂ: dùng memory lock chống trùng lặp
 - Cập nhật mỗi 6 giờ
 """
 import requests
@@ -18,9 +17,6 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from html import unescape
 
-# ============================================
-# CONFIG
-# ============================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "8893995280:AAF9XwWAm9QgPkwmDrhZdY6UQ4zfySooWpk")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "518284897")
 FRED_API_KEY = os.getenv("FRED_API_KEY", "ff3e122af2b2c0a433606476fc6dc5fb")
@@ -31,9 +27,6 @@ DATA_DIR = "data"
 STATE_FILE = f"{DATA_DIR}/state_news.json"
 LOG_FILE = f"{DATA_DIR}/log_news.json"
 
-# ============================================
-# 8 NGUỒN RSS
-# ============================================
 RSS_FEEDS = [
     ("https://feeds.reuters.com/reuters/businessNews", "Reuters"),
     ("https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01", "CNBC"),
@@ -289,11 +282,11 @@ def dich_tieng_viet(text):
     return translated
 
 # ============================================
-# FETCH RSS - FIX TRÙNG TIN
+# FETCH RSS - CHỐNG TRÙNG TUYỆT ĐỐI
 # ============================================
 def fetch_rss_news(log):
     all_news = []
-    all_links = []  # Track links để tránh trùng
+    all_links = []
     
     for url, source_name in RSS_FEEDS:
         try:
@@ -325,13 +318,12 @@ def fetch_rss_news(log):
                 
                 if not title: continue
                 if link and link in log['news_sent']: continue
-                if link and link in all_links: continue  # FIX: Tránh trùng trong cùng lần fetch
+                if link and link in all_links: continue
                 if not is_hot_news(title, description): continue
                 
                 result = analyze_sentiment(title, description)
                 if result is None: continue
                 
-                # Kiểm tra trùng tiêu đề
                 is_dup = False
                 for existing in all_news:
                     w1 = set(title.lower().split()); w2 = set(existing['title_en'].lower().split())
@@ -377,17 +369,14 @@ EVENTS = [
 def check_events():
     log = get_log(); now = datetime.now(); today = now.date(); messages = []
     fedwatch = get_fedwatch_prediction()
-    
     for ev in EVENTS:
         evd = datetime.strptime(ev['date'],'%Y-%m-%d').date()
         evdt = datetime.strptime(ev['date']+' '+ev['time'],'%Y-%m-%d %H:%M')
         days = (evd - today).days
         hours_since = (now - evdt).total_seconds()/3600 if evdt < now else -1
-        
         if 0 <= days <= 5:
             key = f"pre_{ev['id']}"
-            # FIX: Chỉ gửi nếu chưa gửi trong 6h qua
-            if time.time() - log['events'].get(key, 0) >= 21600:
+            if time.time() - log['events'].get(key,0) >= 21600:
                 log['events'][key] = time.time()
                 cd = f"⚠️ <b>HÔM NAY</b> lúc {ev['time']} (giờ VN)" if days==0 else f"📅 <b>NGÀY MAI</b> lúc {ev['time']} (giờ VN)" if days==1 else f"📅 Còn <b>{days} ngày</b> - {ev['date']} lúc {ev['time']} (giờ VN)"
                 fw_text = ""
@@ -401,7 +390,6 @@ def check_events():
                 chien_luoc = ""
                 if ev.get('advice'): chien_luoc = f"\n💡 <b>CHIẾN LƯỢC:</b>\n{ev['advice']}\n"
                 messages.append(f"📅 <b>{ev['name']}</b>\n━━━━━━━━━━━━━━━━━━\n⏰ {cd}\n⚡ Mức độ: {ev['impact']}\n📝 {ev['desc']}{fw_text}{tac_dong}{chien_luoc}\n━━━━━━━━━━━━━━━━━━\n📊 <b>DỮ LIỆU KINH TẾ HIỆN TẠI:</b>\n{econ_summary()}\n\n{now_str()}")
-        
         elif days < 0 and 1 <= hours_since <= 24:
             key = f"post_{ev['id']}"
             if key not in log['events']:
@@ -425,23 +413,26 @@ def check_events():
     return messages
 
 # ============================================
-# MAIN
+# MAIN - MEMORY LOCK CHỐNG TRÙNG
 # ============================================
 print("="*60)
 print("BOT TIN TUC V2 - RSS + FRED + EVENTS")
 print("="*60)
 
+_last_fetch_time = 0
+
 while True:
     try:
-        state = get_state(); now_ts = time.time()
+        state = get_state()
+        now_ts = time.time()
         
-        # FIX: Tránh gửi 2 lần liên tiếp khi deploy
+        # MEMORY LOCK: Chỉ fetch nếu cách lần cuối > 5 phút
+        if now_ts - _last_fetch_time < 300:
+            time.sleep(10)
+            continue
+        
         if not state['started'] or (now_ts - state['last_update'] >= CHU_KY):
-            # Kiểm tra lần cuối gửi cách đây chưa đến 60 giây → bỏ qua
-            if state.get('last_update', 0) > 0 and now_ts - state['last_update'] < 60:
-                time.sleep(10)
-                continue
-            
+            _last_fetch_time = now_ts
             set_state(started=True, last_update=now_ts)
             if 'started_ever' not in state: set_state(started_ever=True)
             
