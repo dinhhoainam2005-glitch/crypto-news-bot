@@ -1,10 +1,12 @@
 """
-BOT TIN TUC PRO - NEWSAPI + GDELT - FIXED
-- Block nguồn rác, blog cá nhân
-- Filter tài chính: chỉ tin liên quan thị trường toàn cầu
-- Fix sentiment: Bitcoin giảm → TIÊU CỰC
+BOT TIN TUC PRO - NEWSAPI + GDELT - FINAL
+- CHỈ nguồn uy tín: Reuters, Bloomberg, CNBC, WSJ, CoinDesk, BBC, CNN...
+- Block nguồn yếu: Yahoo, Times of India, RTE, blog...
+- Fix sentiment: "resuming war" → TIÊU CỰC
+- Filter tài chính + địa chính trị
 - Dịch tiếng Việt + Sentiment
 - Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
+- MEMORY LOCK chống trùng
 """
 import requests
 import time
@@ -25,33 +27,26 @@ DATA_DIR = "data"
 STATE_FILE = f"{DATA_DIR}/state_news.json"
 LOG_FILE = f"{DATA_DIR}/log_news.json"
 
-# ========== BLOCK NGUỒN RÁC ==========
+# ========== NGUỒN UY TÍN ==========
+TRUSTED_SOURCES = [
+    'reuters', 'bloomberg', 'cnbc', 'wall street journal', 'financial times',
+    'coindesk', 'cointelegraph', 'bbc', 'cnn', 'associated press',
+    'marketwatch', 'investing.com', 'forexlive', 'al jazeera',
+    'barrons', 'fortune', 'business insider', 'the economist',
+    'decrypt', 'the block', 'blockworks', 'crypto briefing',
+]
+
+# ========== BLOCK NGUỒN YẾU ==========
 BLOCKED_SOURCES = [
     'naturalnews.com', 'powerlineblog.com', 'slashdot.org',
     'foxnews.com', 'breitbart.com', 'infowars.com', 'zerohedge.com',
-    'beforeitsnews.com', 'thegatewaypundit.com', 'dailycaller.com',
-]
-
-# ========== FILTER TÀI CHÍNH ==========
-FINANCE_KW = [
-    'crypto', 'bitcoin', 'ethereum', 'blockchain',
-    'stock', 'wall street', 'nasdaq', 'dow', 's&p', 'sp500',
-    'forex', 'dollar', 'euro', 'yen', 'yuan',
-    'bond', 'treasury', 'yield', 'interest rate', 'fed', 'fomc',
-    'inflation', 'cpi', 'ppi', 'gdp', 'recession', 'economy',
-    'oil', 'crude', 'gold', 'silver', 'commodity',
-    'etf', 'sec', 'cftc', 'regulation',
-    'market', 'trade', 'tariff', 'sanction',
-    'iran', 'israel', 'russia', 'ukraine', 'china', 'taiwan',
-    'missile', 'war', 'conflict', 'nuclear', 'military',
-    'ceasefire', 'truce', 'peace deal', 'peace talk',
-    'bank', 'central bank', 'imf', 'world bank',
-    'energy', 'oil price', 'crude oil',
+    'times of india', 'yahoo entertainment', 'yahoo news',
+    'rte', 'abc news (au)', 'financial post',
 ]
 
 ANALYSIS_KW = [
     'analysis', 'opinion', 'essay', 'commentary', 'editorial',
-    'explainer', 'explained', 'guide to', 'how to',
+    'explainer', 'explained', 'guide to', 'how to', 'why ',
     'review', 'retrospect', 'podcast', 'episode',
     '5 things', '3 reasons', 'top 10', 'top 5', 'weekly roundup',
 ]
@@ -62,6 +57,22 @@ NON_MARKET = [
     "weather", "hurricane", "earthquake", "tsunami",
     "cattle", "beef", "livestock", "celebrity", "royal family",
     "beach", "erosion", "metal detecting",
+]
+
+FINANCE_KW = [
+    'crypto', 'bitcoin', 'ethereum', 'blockchain',
+    'stock', 'wall street', 'nasdaq', 'dow', 's&p', 'sp500', 'index',
+    'forex', 'dollar', 'euro', 'yen', 'yuan', 'currency',
+    'bond', 'treasury', 'yield', 'interest rate', 'fed', 'fomc',
+    'inflation', 'cpi', 'ppi', 'gdp', 'recession', 'economy',
+    'oil', 'crude', 'gold', 'silver', 'commodity', 'energy',
+    'etf', 'sec', 'cftc', 'regulation',
+    'market', 'trade', 'tariff', 'sanction', 'embargo',
+    'iran', 'israel', 'russia', 'ukraine', 'china', 'taiwan',
+    'missile', 'war', 'conflict', 'nuclear', 'military',
+    'ceasefire', 'truce', 'peace deal', 'peace talk',
+    'bank', 'central bank', 'imf',
+    'drone', 'strike', 'attack', 'troops', 'pentagon', 'nato',
 ]
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -121,20 +132,25 @@ def econ_summary():
         if d: p.append(f.format(d[0]['value']))
     return " | ".join(p) if p else "Đang tải..."
 
+def is_trusted(source_name):
+    source_lower = source_name.lower()
+    return any(t in source_lower for t in TRUSTED_SOURCES)
+
+def is_blocked(source_name):
+    source_lower = source_name.lower()
+    return any(b in source_lower for b in BLOCKED_SOURCES)
+
 def is_hot_news(title, desc=""):
     t = (title+" "+desc).lower()
-    # Bỏ qua phân tích
     if any(kw in t for kw in ANALYSIS_KW): return False
-    # Bỏ qua tin không liên quan
     for kw in NON_MARKET:
         if kw in t: return False
-    # Phải có từ khóa tài chính
     if not any(kw in t for kw in FINANCE_KW): return False
     return True
 
 # ========== SENTIMENT ==========
-POS_CTX = ["ceasefire","truce","peace deal","peace talk","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","gold decline","ending conflict"]
-NEG_CTX = ["missile strike","airstrike","invasion","rate hike","hawkish","tightening","recession","depression","crash","collapse","plunge","tumble","slump","etf outflow","sanction imposed","tariff imposed","nuclear threat","stock crash","gold surge","declare war","slide","drop","fall","decline","selloff"]
+POS_CTX = ["ceasefire","truce","peace deal","peace talk","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","gold decline","ending conflict","de-escalation","diplomatic solution"]
+NEG_CTX = ["missile strike","airstrike","invasion","rate hike","hawkish","tightening","recession","depression","crash","collapse","plunge","tumble","slump","etf outflow","sanction imposed","tariff imposed","nuclear threat","stock crash","gold surge","declare war","slide","drop","fall","decline","selloff","resuming war","drone strike","drone attack","military escalation"]
 POS_KW = ["rate cut","dovish","easing","ceasefire","peace deal","truce","rally","etf approved","etf inflow","institutional","adoption","surge","soar"]
 NEG_KW = ["war","strike","missile","attack","invasion","nuclear","sanction","tariff","rate hike","hawkish","tightening","recession","crash","collapse","plunge","tumble","slump","slide","drop","decline","selloff"]
 
@@ -197,10 +213,9 @@ def fetch_newsapi(log):
                 url = article.get('url', '')
                 published = article.get('publishedAt', '')
                 source_name = (article.get('source', {}) or {}).get('name', 'NewsAPI')
-                source_domain = source_name.lower().replace(' ', '')
                 
-                # Block nguồn rác
-                if any(b in source_domain for b in BLOCKED_SOURCES): continue
+                if is_blocked(source_name): continue
+                if not is_trusted(source_name): continue
                 if not title or url in log['news_sent']: continue
                 if not is_hot_news(title, description): continue
                 
@@ -226,17 +241,17 @@ def fetch_gdelt(log):
     for query in GEO_QUERIES:
         try:
             url = "https://api.gdeltproject.org/api/v2/doc/doc"
-            params = {'query': query, 'mode': 'artlist', 'timespan': '24h', 'maxrecords': 5, 'format': 'json'}
+            params = {'query': query, 'mode': 'artlist', 'timespan': '24h', 'maxrecords': 3, 'format': 'json'}
             r = requests.get(url, params=params, timeout=15)
             if r.status_code != 200: continue
             data = r.json()
-            for article in data.get('articles', [])[:5]:
+            for article in data.get('articles', [])[:3]:
                 title = article.get('title', '')
                 url = article.get('url', '')
                 source_name = article.get('domain', 'GDELT')
-                source_domain = source_name.lower().replace(' ', '')
                 
-                if any(b in source_domain for b in BLOCKED_SOURCES): continue
+                if is_blocked(source_name): continue
+                if not is_trusted(source_name): continue
                 if not title or url in log['news_sent']: continue
                 if not is_hot_news(title, ''): continue
                 
@@ -336,7 +351,7 @@ def check_events():
 
 # ========== MAIN ==========
 print("="*60)
-print("BOT TIN TUC PRO - NEWSAPI + GDELT")
+print("BOT TIN TUC PRO - FINAL")
 print("="*60)
 _last_fetch = 0
 
@@ -350,7 +365,7 @@ while True:
             if 'started_ever' not in state: set_state(started_ever=True)
             news = fetch_all_news()
             label = "đã khởi động" if state.get('started_ever') else "cập nhật 6h"
-            gui(f"📰 <b>BẢN TIN {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 NewsAPI + GDELT\n\n📊 <b>KINH TẾ:</b>\n{econ_summary()}\n\n📋 <b>{len(news)} TIN NÓNG</b>\n\n{now_str()}")
+            gui(f"📰 <b>BẢN TIN {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 NewsAPI + GDELT (nguồn uy tín)\n\n📊 <b>KINH TẾ:</b>\n{econ_summary()}\n\n📋 <b>{len(news)} TIN NÓNG</b>\n\n{now_str()}")
             if news:
                 neg=sum(1 for n in news if 'TIÊU CỰC' in n['loai']); pos=sum(1 for n in news if 'TÍCH CỰC' in n['loai'])
                 total=len(news); nr=neg/total if total>0 else 0
