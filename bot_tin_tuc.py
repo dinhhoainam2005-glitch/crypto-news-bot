@@ -136,10 +136,9 @@ NON_MARKET = [
 def is_hot_news(title, desc=""):
     t = (title+" "+desc).lower()
     if any(kw in t for kw in ANALYSIS_KW): return False
-    if not any(kw in t for kw in FINANCE_KW): return False
     for kw in NON_MARKET:
         if kw in t: return False
-    return True
+    return True  # ← CHỈ CẦN KHÔNG VI PHẠM, KHÔNG CẦN CÓ FINANCE_KW
 
 # ========== SENTIMENT + DICH ==========
 POS_CTX = ["ceasefire","truce","peace deal","peace talk","reopening","withdrawal","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","oil prices drop","stock surge","market rally","gold decline","ending conflict","de-escalation"]
