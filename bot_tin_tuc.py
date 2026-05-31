@@ -1,5 +1,12 @@
 """
-BOT TIN TUC PRO - 8 NGUON RSS + DEBUG TITLE
+BOT TIN TUC PRO - GOOGLE NEWS + 5 NGUON RSS
+- Google News (Reuters, Bloomberg, FT, Economist...)
+- CoinDesk, Cointelegraph, BBC, CNN
+- FILTER: Chỉ HOT NEWS, không phân tích
+- Fix: unescape title + xóa thẻ HTML
+- Dịch tiếng Việt + Sentiment
+- Sự kiện kinh tế: FOMC, CPI, NFP, GDP, PPI (FRED)
+- MEMORY LOCK chống trùng
 """
 import requests
 import time
@@ -17,18 +24,15 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "ff3e122af2b2c0a433606476fc6dc5fb")
 CHU_KY = 21600
 MAX_NEWS = 10
 DATA_DIR = "data"
-STATE_FILE = f"{DATA_DIR}/state_news_pro.json"
-LOG_FILE = f"{DATA_DIR}/log_news_pro.json"
+STATE_FILE = f"{DATA_DIR}/state_news.json"
+LOG_FILE = f"{DATA_DIR}/log_news.json"
 
 RSS_FEEDS = [
-    ("https://news.google.com/rss/search?q=site:reuters.com+business+finance&hl=en-US&gl=US&ceid=US:en", "Reuters"),
-    ("https://www.ft.com/world?format=rss", "Financial Times"),
-    ("https://foreignpolicy.com/feed/", "Foreign Policy"),
-    ("https://feeds.bbci.co.uk/news/world/rss.xml", "BBC World"),
-    ("http://rss.cnn.com/rss/edition_world.rss", "CNN World"),
-    ("https://warontherocks.com/feed/", "War on the Rocks"),
+    ("https://news.google.com/rss/search?q=reuters+bloomberg+financial+times+economy+finance+fed+inflation&hl=en-US&gl=US&ceid=US:en", "Google News"),
     ("https://www.coindesk.com/arc/outboundfeeds/news/", "CoinDesk"),
     ("https://cointelegraph.com/rss", "Cointelegraph"),
+    ("https://feeds.bbci.co.uk/news/world/rss.xml", "BBC World"),
+    ("http://rss.cnn.com/rss/edition_world.rss", "CNN World"),
 ]
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -62,9 +66,19 @@ def now_str():
 
 def clean_html(t):
     if not t: return ""
-    t = re.sub(r'<!\[CDATA\[.*?\]\]>', '', t)
-    t = unescape(re.sub(r'<[^>]+>', '', t))
+    t = unescape(t)
+    t = re.sub(r'<[^>]+>', '', t)
     return t.strip()
+
+def parse_title(title_el):
+    """Parse title từ XML element - xử lý cả text và HTML"""
+    if title_el is None: return ""
+    text = title_el.text
+    if text is None: return ""
+    text = unescape(text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'&[a-z]+;', '', text)
+    return text.strip()
 
 def format_date(d):
     for f in ["%Y-%m-%dT%H:%M:%SZ","%Y-%m-%dT%H:%M:%S%z","%a, %d %b %Y %H:%M:%S %z","%a, %d %b %Y %H:%M:%S %Z","%Y-%m-%dT%H:%M:%S%z"]:
@@ -99,18 +113,16 @@ ANALYSIS_KW = [
     'why the','how the','when the','where the','who the',
     'is this the end','can it','will it','should you',
     'why ','how to ','when will ','where is ','what does ',
-    '?','could ','might ','may ','perhaps','maybe',
     '5 things','3 reasons','top 10','top 5','weekly roundup',
     'podcast','episode','listen now','subscribe',
 ]
 
 NON_MARKET = [
-    "generational war","culture war","boomer","gen z",
-    "tiktok","influencer","celebrity","royal family",
     "sports","gaming","movie","netflix","disney",
     "grammy","oscar","emmy","super bowl","world cup","nfl","nba",
     "weather","hurricane","earthquake","tsunami","volcano",
     "cattle","beef","livestock","dairy","crop","harvest",
+    "celebrity","royal family","tiktok","influencer",
 ]
 
 def is_hot_news(title, desc=""):
@@ -120,7 +132,7 @@ def is_hot_news(title, desc=""):
         if kw in t: return False
     return True
 
-# ========== SENTIMENT + DICH ==========
+# ========== SENTIMENT ==========
 POS_CTX = ["ceasefire","truce","peace deal","peace talk","reopening","withdrawal","rate cut","dovish","easing","stimulus","rebound","recover","surge","soar","rally","record high","bull market","etf approved","etf inflow","institutional","adoption","oil prices drop","stock surge","market rally","gold decline","ending conflict","de-escalation"]
 NEG_CTX = ["war intensifies","missile strike","airstrike","invasion","oil prices surge","rate hike","hawkish","tightening","recession","depression","crash","collapse","plunge","tumble","slump","etf outflow","sanction imposed","tariff imposed","nuclear threat","military escalation","stock crash","market crash","gold surge","troops deploy","mobilization","declare war"]
 POS_KW = ["rate cut","dovish","easing","ceasefire","peace deal","peace talk","truce","withdrawal","bull market","rally","etf approved","etf inflow","blackrock","institutional","adoption","stimulus","rebound","recover","surge","soar"]
@@ -139,12 +151,13 @@ def analyze(title, desc=""):
     dk = list(set(dk))[:3]
     if ns>ps:
         l = "🔴🔴🔴 CỰC KỲ TIÊU CỰC" if ns>=9 else ("🔴🔴 RẤT TIÊU CỰC" if ns>=6 else "🔴 TIÊU CỰC")
-        g="🥇 Vàng: 🟢 TĂNG"; c="₿ Crypto: 🔴 GIẢM"; u="💵 USD: 🟢 TĂNG"; a="⚠️ SHORT"
+        g="🥇 Vàng: 🟢 TĂNG"; c="₿ Crypto: 🔴 GIẢM"; a="⚠️ SHORT"
     else:
         l = "🟢🟢🟢 CỰC KỲ TÍCH CỰC" if ps>=9 else ("🟢🟢 TÍCH CỰC" if ps>=6 else "🟢 TÍCH CỰC")
-        g="🥇 Vàng: 🔴 GIẢM"; c="₿ Crypto: 🟢 TĂNG"; u="💵 USD: 🔴 GIẢM"; a="✅ LONG"
-    return {'loai':l,'gold':g,'crypto':c,'usd':u,'advice':a,'keywords':dk}
+        g="🥇 Vàng: 🔴 GIẢM"; c="₿ Crypto: 🟢 TĂNG"; a="✅ LONG"
+    return {'loai':l,'gold':g,'crypto':c,'advice':a,'keywords':dk}
 
+# ========== DỊCH ==========
 FIX_D = {"tỷ lệ cắt":"hạ lãi suất","tỷ lệ tăng":"tăng lãi suất","chợ bò":"thị trường tăng","chợ gấu":"thị trường giảm","tiền điện tử":"crypto","chuỗi khối":"blockchain","trú ẩn an toàn":"tài sản trú ẩn","cục dự trữ liên bang":"Fed","quỹ giao dịch trao đổi":"ETF","bảng lương phi nông nghiệp":"NFP","chỉ số giá tiêu dùng":"CPI","chỉ số giá sản xuất":"PPI","tổng sản phẩm quốc nội":"GDP","phố wall":"Phố Wall","nhà trắng":"Nhà Trắng","lầu năm góc":"Lầu Năm Góc","dầu thô":"dầu","giá dầu":"giá dầu"}
 
 def dich(text):
@@ -157,57 +170,36 @@ def dich(text):
     for w,c in FIX_D.items(): t = re.sub(r'\b'+re.escape(w)+r'\b', c, t, flags=re.IGNORECASE)
     return t[0].upper()+t[1:] if len(t)>1 else t
 
-# ========== FETCH RSS + DEBUG ==========
+# ========== FETCH RSS ==========
 def fetch_rss_news(log):
     all_news = []
     all_links = []
-    debug_msgs = []
     
     for url, src in RSS_FEEDS:
         try:
-            r = requests.get(url, timeout=15, headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-            if r.status_code != 200:
-                debug_msgs.append(f"❌ {src}: HTTP {r.status_code}")
-                continue
-            
+            r = requests.get(url, timeout=15, headers={'User-Agent':'Mozilla/5.0'})
+            if r.status_code != 200: continue
             root = ET.fromstring(r.content)
             items = root.findall('.//item') or root.findall('.//{http://www.w3.org/2005/Atom}entry')
             
-            found = 0
-            sample_titles = []
-            blocked_reasons = []
-            
-            for idx, item in enumerate(items[:10]):
+            for item in items[:10]:
                 title_el = item.find('title') or item.find('{http://www.w3.org/2005/Atom}title')
-                title = title_el.text if title_el is not None else ''
+                title = parse_title(title_el)
+                
                 desc_el = item.find('description') or item.find('{http://www.w3.org/2005/Atom}summary')
                 desc = clean_html(desc_el.text) if desc_el is not None and desc_el.text else ''
+                
                 link_el = item.find('link') or item.find('{http://www.w3.org/2005/Atom}link')
                 link = (link_el.get('href') or link_el.text or '') if link_el is not None else ''
+                
                 date_el = item.find('pubDate') or item.find('{http://www.w3.org/2005/Atom}updated') or item.find('{http://www.w3.org/2005/Atom}published')
                 pubdate = date_el.text if date_el is not None else ''
                 
-                if idx < 2:
-                    sample_titles.append(title[:80])
-                
                 if not title or link in log['news_sent'] or link in all_links: continue
-                
-                # Debug: check why blocked
-                t = (title+" "+desc).lower()
-                if any(kw in t for kw in ANALYSIS_KW):
-                    blocked_kw = [kw for kw in ANALYSIS_KW if kw in t][:2]
-                    if idx < 2: blocked_reasons.append(f"ANALYSIS: {blocked_kw}")
-                    continue
-                
-                blocked_nm = [kw for kw in NON_MARKET if kw in t]
-                if blocked_nm:
-                    if idx < 2: blocked_reasons.append(f"NON_MARKET: {blocked_nm}")
-                    continue
+                if not is_hot_news(title, desc): continue
                 
                 result = analyze(title, desc)
-                if not result:
-                    if idx < 2: blocked_reasons.append("NO_SENTIMENT")
-                    continue
+                if not result: continue
                 
                 dup = False
                 for e in all_news:
@@ -215,28 +207,14 @@ def fetch_rss_news(log):
                     if w1 and w2 and len(w1&w2)/len(w1|w2)>0.5: dup=True; break
                 if dup: continue
                 
-                found += 1
                 log['news_sent'].append(link); all_links.append(link)
                 all_news.append({
                     'title_vi':dich(title),'title_en':title,'description':desc,
                     'source':src,'date':format_date(pubdate) if pubdate else '',
                     'loai':result['loai'],'gold':result['gold'],'crypto':result['crypto'],
-                    'usd':result['usd'],'advice':result['advice'],'keywords':result['keywords']
+                    'advice':result['advice'],'keywords':result['keywords']
                 })
-            
-            debug_line = f"{'✅' if found>0 else '⚠️'} {src}: {len(items)} items → {found} hot"
-            if sample_titles:
-                debug_line += f"\n   📰 {sample_titles[0][:70]}"
-            if blocked_reasons:
-                debug_line += f"\n   🚫 {blocked_reasons[0]}"
-            debug_msgs.append(debug_line)
-            
-        except Exception as e:
-            debug_msgs.append(f"❌ {src}: {str(e)[:60]}")
-    
-    if debug_msgs:
-        gui(f"🔍 <b>DEBUG RSS:</b>\n" + "\n".join(debug_msgs))
-    
+        except: continue
     return all_news
 
 def fetch_all_news():
@@ -244,7 +222,7 @@ def fetch_all_news():
     news = fetch_rss_news(log)
     log['news_sent'] = log['news_sent'][-500:]; save_log(log)
     pr = {'CỰC KỲ TIÊU CỰC':0,'RẤT TIÊU CỰC':1,'TIÊU CỰC':2,'TÍCH CỰC':3,'CỰC KỲ TÍCH CỰC':4}
-    news.sort(key=lambda n: (pr.get(n['loai'].split()[-1] if 'CỰC' in n['loai'] else n['loai'].split()[-1],3), 0 if any(s in n['source'].lower() for s in ['reuters','ft','bbc','cnn','foreign policy']) else 1))
+    news.sort(key=lambda n: pr.get(n['loai'].split()[-1] if 'CỰC' in n['loai'] else n['loai'].split()[-1],3))
     return news[:MAX_NEWS]
 
 # ========== EVENTS ==========
@@ -310,7 +288,7 @@ def check_events():
 
 # ========== MAIN ==========
 print("="*60)
-print("BOT TIN TUC PRO + DEBUG")
+print("BOT TIN TUC PRO")
 print("="*60)
 _last_fetch = 0
 
@@ -324,9 +302,7 @@ while True:
             if 'started_ever' not in state: set_state(started_ever=True)
             news = fetch_all_news()
             label = "đã khởi động" if state.get('started_ever') else "cập nhật 6h"
-            srcs = ['Reuters','Financial Times','Foreign Policy','BBC World','CNN World','War on the Rocks','CoinDesk','Cointelegraph']
-            cnt = sum(1 for n in news if n['source'] in srcs)
-            gui(f"📰 <b>BẢN TIN {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 FRED+RSS: ✅ {cnt} tin từ 8 nguồn\n\n📊 <b>KINH TẾ:</b>\n{econ_summary()}\n\n📋 <b>{len(news)} TIN NÓNG</b>\n\n{now_str()}")
+            gui(f"📰 <b>BẢN TIN {label}!</b>\n━━━━━━━━━━━━━━━━━━\n📡 5 nguồn RSS\n\n📊 <b>KINH TẾ:</b>\n{econ_summary()}\n\n📋 <b>{len(news)} TIN NÓNG</b>\n\n{now_str()}")
             if news:
                 neg=sum(1 for n in news if 'TIÊU CỰC' in n['loai']); pos=sum(1 for n in news if 'TÍCH CỰC' in n['loai'])
                 total=len(news); nr=neg/total if total>0 else 0
@@ -346,7 +322,7 @@ while True:
                     tt = "\n".join(tp)
                     msg = f"📰 {n['loai']}\n━━━━━━━━━━━━━━━━━━\n🇻🇳 <b>{n['title_vi']}</b>\n\n"
                     if tt: msg += f"{tt}\n\n"
-                    msg += f"📡 {n['source']}{dl}\n🇬🇧 {n['title_en']}\n\n🏦 <b>Dự báo:</b>\n{n['gold']}\n{n['crypto']}\n{n['usd']}\n\n💡 {n['advice']}\n\n{now_str()}"
+                    msg += f"📡 {n['source']}{dl}\n🇬🇧 {n['title_en']}\n\n🏦 <b>Dự báo:</b>\n{n['gold']}\n{n['crypto']}\n\n💡 {n['advice']}\n\n{now_str()}"
                     gui(msg); time.sleep(1)
             for m in check_events(): gui(m)
         time.sleep(60)
